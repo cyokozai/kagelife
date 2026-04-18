@@ -4,6 +4,26 @@
 .env
 
 
+# ============================== Go ============================== #
+
+# Created by https://www.toptal.com/developers/gitignore/api/go,macos,linux
+
+### Go ###
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# ビルド成果物
+kagelive
+kagelive-*
+
+
 # ============================== Terraform ============================== #
 
 
