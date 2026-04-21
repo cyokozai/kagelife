@@ -1,33 +1,29 @@
-FROM golang:1.24-bookworm
+FROM golang:1.26-alpine
 
-# ── システム依存（Ebitengineビルドに必要なグラフィックス/オーディオライブラリ） ──
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# ── ビルドツール + Ebitengine 依存（Alpine パッケージ名） ──────────
+RUN apk add --no-cache \
+    # CGO コンパイルに必要
+    build-base \
+    pkgconfig \
     # Ebitengine: OpenGL
-    libgl1-mesa-dev \
+    mesa-dev \
     # Ebitengine: X11 / 入力
     libx11-dev \
+    libxrandr-dev \
+    libxinerama-dev \
     libxcursor-dev \
     libxi-dev \
-    libxinerama-dev \
-    libxrandr-dev \
     libxxf86vm-dev \
-    # Ebitengine: オーディオ（未使用でもビルド要）
-    libasound2-dev \
+    # Ebitengine: オーディオ
+    alsa-lib-dev \
     # 汎用ツール
     git \
     curl \
     ca-certificates \
-    && update-ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    bash
 
 # ── GitHub CLI ──
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-        > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update && apt-get install -y --no-install-recommends gh \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache github-cli
 
 # ── Go 開発ツール ──
 # golangci-lint
