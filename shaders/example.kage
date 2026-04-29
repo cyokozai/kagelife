@@ -1,0 +1,29 @@
+//kage:unit pixels
+package main
+
+// Time は起動からの経過時間（秒）。main.go から毎フレーム注入される。
+var Time float
+
+// Resolution はウィンドウサイズ {width, height}。main.go から注入される。
+var Resolution vec2
+
+// Fragment はフラグメントシェーダーのエントリーポイント。
+// dstPos : 描画先ピクセルの座標
+// srcPos : テクスチャ座標（今回は未使用）
+// color  : 頂点カラー（今回は未使用）
+// 戻り値 : そのピクセルの RGBA 色（各成分 0.0〜1.0）
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	// ピクセル座標を 0.0〜1.0 に正規化
+	uv := dstPos.xy / Resolution
+
+	// 時間で変化する波紋パターン
+	dist := distance(uv, vec2(0.5, 0.5))
+	wave := sin(dist*40.0-Time*3.0) * 0.5 + 0.5
+
+	// RGB に少しずつ位相をずらして色付け
+	r := sin(dist*40.0-Time*3.0+0.0)*0.5 + 0.5
+	g := sin(dist*40.0-Time*3.0+2.1)*0.5 + 0.5
+	b := sin(dist*40.0-Time*3.0+4.2)*0.5 + 0.5
+
+	return vec4(r*wave, g*wave, b*wave, 1.0)
+}
