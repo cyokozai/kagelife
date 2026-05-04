@@ -25,8 +25,12 @@ func (w *Watcher) Events() <-chan string {
 
 
 func New(dir string) (*Watcher, error) {
-	watcher, _ := fsnotify.NewWatcher()
-	err := watcher.Add(dir)
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
+
+	err = watcher.Add(dir)
 	if err != nil {
 		log.Println(err)
 
@@ -45,9 +49,6 @@ func New(dir string) (*Watcher, error) {
 					log.Println("watcher.Events is not ok")
 
 					return 
-				}
-				if event.Name == dir {
-					log.Printf("event: %s", event.Name)
 				}
 				if strings.HasSuffix(event.Name, ".kage") {
 					log.Printf("event: %s", event.Name)
@@ -95,8 +96,8 @@ func (w *Watcher) Close() {
 		close(w.quit)
 	})
 }
-// debounceLoop は raw チャネルからイベントを受け取り、
-// delay 間隔でデバウンスして events チャネルに送出する。
+
+
 func (w *Watcher) debounceLoop() {
 	timers := map[string]*time.Timer{}
 	for {
@@ -113,9 +114,3 @@ func (w *Watcher) debounceLoop() {
 		}
 	}
 }
-
-// ── 以下は実装時に参考にする型（使い方を示すためのコメント） ──────────
-
-// closeOnce は Close() の二重呼び出しを防ぐための sync.Once の使用例。
-// （フィールド名は自由に変えて構わない）
-var _ sync.Once
