@@ -48,7 +48,7 @@ func New(dir string) (*Watcher, error) {
 				if !ok {
 					log.Println("watcher.Events is not ok")
 
-					return 
+					return
 				}
 				if strings.HasSuffix(event.Name, ".kage") {
 					log.Printf("event: %s", event.Name)
@@ -57,7 +57,7 @@ func New(dir string) (*Watcher, error) {
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					log.Println("watcher.Errors is not ok")
-					
+
 					return
 				}
 				log.Println(err)
@@ -66,15 +66,15 @@ func New(dir string) (*Watcher, error) {
 	}()
 
 	w := &Watcher{
-		events: events, 
-		raw: raw, 
-		quit: quit, 
+		events: events,
+		raw: raw,
+		quit: quit,
 		delay: 100 * time.Millisecond,
 	}
 	go w.debounceLoop()
 
 	return w, nil
-} 
+}
 
 
 func newForTest(delay time.Duration) *Watcher {
@@ -110,7 +110,7 @@ func (w *Watcher) debounceLoop() {
 				w.events <- path
 			})
 		case <- w.quit:
-			return 
+			return
 		}
 	}
 }
