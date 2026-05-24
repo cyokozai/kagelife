@@ -1,48 +1,85 @@
 package main
 
 import (
+	"errors"
 	"log"
+	"os"
+	"strings"
 	"time"
 
-	"github.com/hajimehoshi/ebiten/v2"
-
+	"github.com/cyokozai/kagelive/internal/filewatcher"
 	"github.com/cyokozai/kagelive/internal/shadermgr"
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 const (
 	screenWidth  = 640
 	screenHeight = 480
+	shaderDir 	 = "shaders"
 )
 
-// ebitenCompiler は ebiten.NewShader を shadermgr.ShaderCompiler 型に変換する。
+
+type Game struct {
+	sm      *shadermgr.Manager
+	watcher *filewatcher.Watcher
+	startAt time.Time
+}
+
+
 func ebitenCompiler(src []byte) (shadermgr.Shader, error) {
 	return ebiten.NewShader(src)
 }
 
-// Game は Ebitengine のゲームループを実装する。
-type Game struct {
-	sm      *shadermgr.Manager
-	startAt time.Time
-}
 
 func NewGame() (*Game, error) {
 	g := &Game{
 		sm:      shadermgr.New(ebitenCompiler),
 		startAt: time.Now(),
 	}
-	// 起動時に shaders/example.kage を読み込む
-	if err := g.sm.Load("shaders/example.kage"); err != nil {
+
+	entries, err := os.ReadDir("shaders")
+	if err != nil {
 		return nil, err
 	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".kage") {
+			path := filepath.Join(shaderDir, e.Name())
+			if err := g.sm.Load(path); err != nil {
+        log.Printf("warn: skip %s: %v", path, err)
+			}
+		}
+	}
+
 	return g, nil
 }
 
-// Update は毎フレーム呼ばれるロジック更新。
+
 func (g *Game) Update() error {
+	select {
+	case path := <-g.watcher.Events:
+		src, err := os.ReadFile(path)
+		if err != nil {
+			log.Printf("error: failed to read %s: %v", path, err)
+			break
+		}
+
+		err := g.sm.Reload(path, src);
+		if err != nil {
+			log.Printf("error: failed to reload %s: %v", path, err)
+		}
+	default:
+	}
+
+	for i := 0; i < g.sm.Len(); i++ {
+		if ebiten.IsKeyPressed(ebiten.Key0 + ebiten.Key(i)) {
+			g.sm.Switch(i)
+		}
+	}
+
 	return nil
 }
 
-// Draw は毎フレーム呼ばれる描画処理。
+
 func (g *Game) Draw(screen *ebiten.Image) {
 	shader, ok := g.sm.Active().(*ebiten.Shader)
 	if !ok || shader == nil {
@@ -60,10 +97,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	screen.DrawRectShader(w, h, shader, op)
 }
 
-// Layout はウィンドウサイズを返す。
+
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return screenWidth, screenHeight
 }
+
 
 func main() {
 	ebiten.SetWindowSize(screenWidth, screenHeight)
@@ -73,8 +111,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer g.watcher.Close()
 
-	if err := ebiten.RunGame(g); err != nil {
+	if err := ebiten.RunGame(g); err != nil && !errors.Is(err, ebiten.Termination) {
 		log.Fatal(err)
 	}
 }
