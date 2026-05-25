@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,7 +38,13 @@ func NewGame() (*Game, error) {
 		startAt: time.Now(),
 	}
 
-	entries, err := os.ReadDir("shaders")
+	w, err := filewatcher.New(shaderDir)
+	if err != nil {
+		return nil, err
+	}
+	g.watcher = w
+
+	entries, err := os.ReadDir(shaderDir)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +52,7 @@ func NewGame() (*Game, error) {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".kage") {
 			path := filepath.Join(shaderDir, e.Name())
 			if err := g.sm.Load(path); err != nil {
-        log.Printf("warn: skip %s: %v", path, err)
+				log.Printf("warn: skip %s: %v", path, err)
 			}
 		}
 	}
@@ -63,7 +70,7 @@ func (g *Game) Update() error {
 			break
 		}
 
-		err := g.sm.Reload(path, src);
+		err = g.sm.Reload(path, src)
 		if err != nil {
 			log.Printf("error: failed to reload %s: %v", path, err)
 		}
