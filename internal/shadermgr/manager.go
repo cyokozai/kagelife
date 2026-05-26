@@ -15,8 +15,7 @@ import (
 	"os"
 )
 
-// Shader は GPU シェーダーリソースを表すインターフェース。
-// *ebiten.Shader は Dispose() を持つのでこのインターフェースを満たす。
+
 type Shader interface {
 	Dispose()
 }
