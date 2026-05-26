@@ -9,6 +9,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+
 type Watcher struct {
 	Events  <-chan string      // 外部公開: 受信専用チャネル
 	events  chan string        // 内部送信用チャネル
