@@ -11,6 +11,7 @@ import (
 	"github.com/cyokozai/kagelive/internal/filewatcher"
 	"github.com/cyokozai/kagelive/internal/shadermgr"
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
 
@@ -58,6 +59,10 @@ func NewGame() (*Game, error) {
 		}
 	}
 
+	for i, name := range g.sm.Names() {
+		log.Printf("loaded shader %d: %s", i, name)
+	}
+
 	return g, nil
 }
 
@@ -79,7 +84,7 @@ func (g *Game) Update() error {
 	}
 
 	for i := 0; i < g.sm.Len(); i++ {
-		if ebiten.IsKeyPressed(ebiten.Key0 + ebiten.Key(i)) {
+		if inpututil.IsKeyJustPressed(ebiten.Key1 + ebiten.Key(i)) {
 			g.sm.Switch(i)
 		}
 	}
