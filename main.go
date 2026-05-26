@@ -13,6 +13,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+
 const (
 	screenWidth  = 640
 	screenHeight = 480
