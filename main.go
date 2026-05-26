@@ -83,7 +83,7 @@ func (g *Game) Update() error {
 	default:
 	}
 
-	for i := 0; i < g.sm.Len(); i++ {
+	for i := 0; i < g.sm.Len() && i < 9; i++ {
 		if inpututil.IsKeyJustPressed(ebiten.Key1 + ebiten.Key(i)) {
 			g.sm.Switch(i)
 		}

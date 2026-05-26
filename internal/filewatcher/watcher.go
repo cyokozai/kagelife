@@ -97,29 +97,37 @@ func (w *Watcher) Close() {
 }
 
 func (w *Watcher) debounceLoop() {
+	type firedMsg struct {
+		path  string
+		timer *time.Timer
+	}
 	timers := map[string]*time.Timer{}
-	fired := make(chan string, 16)
+	fired := make(chan firedMsg, 16)
+
 	for {
 		select {
 		case path := <-w.raw:
 			if t, ok := timers[path]; ok {
 				t.Stop()
-				delete(timers, path)
 			}
 			p := path
-			timers[path] = time.AfterFunc(w.delay, func() {
+			var t *time.Timer
+			t = time.AfterFunc(w.delay, func() {
 				select {
 				case w.events <- p:
 				case <-w.quit:
 				}
 				select {
-				case fired <- p:
+				case fired <- firedMsg{path: p, timer: t}:
 				default:
 				}
 			})
+			timers[path] = t
 
-		case path := <-fired:
-			delete(timers, path)
+		case msg := <-fired:
+			if timers[msg.path] == msg.timer {
+				delete(timers, msg.path)
+			}
 
 		case <-w.quit:
 			for _, t := range timers {
