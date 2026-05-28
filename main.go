@@ -126,7 +126,10 @@ func main() {
 	}
 	defer g.watcher.Close()
 
-	if err := ebiten.RunGame(g); err != nil && !errors.Is(err, ebiten.Termination) {
+	opts := &ebiten.RunGameOptions{
+		ScreenTransparent: true,
+	}
+	if err := ebiten.RunGameWithOptions(g, opts); err != nil && !errors.Is(err, ebiten.Termination) {
 		log.Fatal(err)
 	}
 }
