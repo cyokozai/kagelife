@@ -11,14 +11,15 @@ import (
 
 
 type Watcher struct {
-	Events  <-chan string      // 外部公開: 受信専用チャネル
-	events  chan string        // 内部送信用チャネル
-	raw     chan string        // fsnotify の生イベントを受け取る
-	quit    chan struct{}      // Close() で送る停止シグナル
+	Events  <-chan string     // 外部公開: 受信専用チャネル
+	events  chan string       // 内部送信用チャネル
+	raw     chan string       // fsnotify の生イベントを受け取る
+	quit    chan struct{}     // Close() で送る停止シグナル
 	once    sync.Once         // Close() の二重呼び出し防止
 	delay   time.Duration     // デバウンス間隔
 	watcher *fsnotify.Watcher // goroutine リーク防止のために保持
 }
+
 
 func New(dir string) (*Watcher, error) {
 	fw, err := fsnotify.NewWatcher()
@@ -73,6 +74,7 @@ func New(dir string) (*Watcher, error) {
 	return w, nil
 }
 
+
 func newForTest(delay time.Duration) *Watcher {
 	events := make(chan string, 8)
 	w := &Watcher{
@@ -87,6 +89,7 @@ func newForTest(delay time.Duration) *Watcher {
 	return w
 }
 
+
 func (w *Watcher) Close() {
 	w.once.Do(func() {
 		close(w.quit)
@@ -95,6 +98,7 @@ func (w *Watcher) Close() {
 		}
 	})
 }
+
 
 func (w *Watcher) debounceLoop() {
 	type firedMsg struct {
