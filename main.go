@@ -99,6 +99,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		return
 	}
 
+	screen.Clear()
+
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 	elapsed := float32(time.Since(g.startAt).Seconds())
 
