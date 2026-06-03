@@ -2,7 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"github.com/cyokozai/kagelive/internal/filewatcher"
 	"github.com/cyokozai/kagelive/internal/shadermgr"
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
@@ -23,9 +26,13 @@ const (
 
 
 type Game struct {
-	sm      *shadermgr.Manager
-	watcher *filewatcher.Watcher
-	startAt time.Time
+	sm        *shadermgr.Manager
+	watcher   *filewatcher.Watcher
+	startAt   time.Time
+	lastErr   error
+	tapTimes  []time.Time
+	BPM			  float64
+	beatStart time.Time
 }
 
 
@@ -117,6 +124,13 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return screenWidth, screenHeight
 }
 
+
+func calcBPM(taps []time.Time) float64 {
+	intervals := make([]float64, len(taps)-1)
+	for i := 1; i < len(taps); i++ {
+		intervals[i-1] = taps[i].Sub(taps[i-1]).Seconds()
+	}
+}
 
 func main() {
 	ebiten.SetWindowSize(screenWidth, screenHeight)
