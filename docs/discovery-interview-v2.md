@@ -1,7 +1,7 @@
-# Discovery Interview: KageLive V2
+# Discovery Interview: KageLife V2
 
 **実施日**: 2026-05-27
-**対象**: KageLive V2 要件定義
+**対象**: KageLife V2 要件定義
 
 ---
 

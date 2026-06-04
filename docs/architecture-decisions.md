@@ -1,4 +1,4 @@
-# アーキテクチャ設計書: KageLive
+# アーキテクチャ設計書: KageLife
 
 **作成日**: 2026-04-18
 
@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart TD
-    subgraph "KageLive プロセス"
+    subgraph "KageLife プロセス"
         MAIN["main.go\nEbitengine起動・設定"]
         GAME["Game struct\nebiten.Game実装\nUpdate / Draw / Layout"]
         SM["ShaderManager\n*ebiten.Shaderの管理\nロード・切替・Dispose"]
@@ -80,7 +80,7 @@ sequenceDiagram
 ## パッケージ構成
 
 ```
-kagelive/
+kagelife/
 ├── main.go                        # エントリーポイント・Game struct (Update/Draw/Layout)
 ├── internal/
 │   ├── shadermgr/

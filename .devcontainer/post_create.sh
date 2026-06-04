@@ -6,7 +6,7 @@ echo "==> [postCreate] Starting devcontainer setup..."
 # ── 1. go.mod の初期化（初回のみ） ────────────────────────────
 if [ ! -f go.mod ]; then
     echo "==> Initializing go.mod..."
-    go mod init github.com/cyokozai/kagelive
+    go mod init github.com/cyokozai/kagelife
 fi
 
 # ── 2. 依存ライブラリの取得 ────────────────────────────────────

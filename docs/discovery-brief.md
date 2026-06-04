@@ -1,4 +1,4 @@
-# Discovery Brief: KageLive
+# Discovery Brief: KageLife
 
 > arch-requirements への引き渡し資料
 > 作成日: 2026-04-18
@@ -24,7 +24,7 @@ VJパフォーマンス中に、Kageシェーダーをリアルタイムに切�
 ## 2. Solution Hypothesis
 
 **価値提案**:
-KageLiveは、Ebitengine/Kageシェーダーをファイル保存だけでリアルタイム反映し、
+KageLifeは、Ebitengine/Kageシェーダーをファイル保存だけでリアルタイム反映し、
 キーボードで瞬時に切り替えられる、Go開発者のためのVJライブコーディングツール。
 
 **North Star Metric**: ファイル保存からシェーダー反映までのレイテンシ < 200ms
@@ -108,4 +108,4 @@ KageLiveは、Ebitengine/Kageシェーダーをファイル保存だけでリア
 
 - [Ebitengine Kageドキュメント](https://ebitengine.org/ja/documents/shader.html)
 - [kage-desk（参考OSS）](https://github.com/tinne26/kage-desk)
-- [KageLive リポジトリ](https://github.com/cyokozai/kagelive)
+- [KageLife リポジトリ](https://github.com/cyokozai/kagelife)

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/cyokozai/kagelive/internal/shadermgr"
+	"github.com/cyokozai/kagelife/internal/shadermgr"
 )
 
 // ── モック用ヘルパー ──────────────────────────────────────────────────

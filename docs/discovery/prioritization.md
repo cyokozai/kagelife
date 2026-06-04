@@ -4,7 +4,7 @@ title: Prioritization
 date: 2026-04-18
 ---
 
-# Phase 4: Prioritization — KageLive
+# Phase 4: Prioritization — KageLife
 
 ## MoSCoW
 

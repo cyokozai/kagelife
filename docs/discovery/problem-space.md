@@ -4,7 +4,7 @@ title: Problem Space
 date: 2026-04-18
 ---
 
-# Phase 1: Problem Space — KageLive
+# Phase 1: Problem Space — KageLife
 
 ## JTBD（Jobs To Be Done）
 
@@ -35,18 +35,18 @@ date: 2026-04-18
 
 ```mermaid
 journey
-    title KageLive を使ったVJパフォーマンスの旅
+    title KageLife を使ったVJパフォーマンスの旅
     section 準備
       shaders/ディレクトリにkageファイルを置く: 5: VJ
-      KageLiveを起動する: 5: VJ
+      KageLifeを起動する: 5: VJ
     section ライブコーディング
       VS Codeでシェーダーを編集する: 5: VJ
       ファイルを保存する: 5: VJ
-      画面が即座に更新される: 5: KageLive
-      コンパイルエラーでも前の映像が維持される: 4: KageLive
+      画面が即座に更新される: 5: KageLife
+      コンパイルエラーでも前の映像が維持される: 4: KageLife
     section パフォーマンス
       キーボードで別シェーダーに切り替える: 5: VJ
-      Time Uniformでアニメーションが流れる: 5: KageLive
+      Time Uniformでアニメーションが流れる: 5: KageLife
     section 将来（V2）
       複数シェーダーを重ねてミックスする: 3: VJ
       パラメータをGUIで操作する: 3: VJ

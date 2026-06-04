@@ -4,7 +4,7 @@ title: Assumption Mapping
 date: 2026-04-18
 ---
 
-# Phase 3: Assumption Mapping — KageLive
+# Phase 3: Assumption Mapping — KageLife
 
 ## IDEO三角形の評価
 

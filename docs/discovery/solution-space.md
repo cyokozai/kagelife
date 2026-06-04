@@ -4,11 +4,11 @@ title: Solution Space
 date: 2026-04-18
 ---
 
-# Phase 2: Solution Space — KageLive
+# Phase 2: Solution Space — KageLife
 
 ## 価値提案
 
-> **KageLiveは、Ebitengine/Kageシェーダーをファイル保存だけでリアルタイム反映し、
+> **KageLifeは、Ebitengine/Kageシェーダーをファイル保存だけでリアルタイム反映し、
 > キーボードで瞬時に切り替えられる、Go開発者のためのVJライブコーディングツールです。**
 
 ## North Star Metric
