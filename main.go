@@ -13,6 +13,7 @@ import (
 
 	"github.com/cyokozai/kagelife/internal/filewatcher"
 	"github.com/cyokozai/kagelife/internal/shadermgr"
+	
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -55,8 +56,6 @@ func NewGame() (*Game, error) {
 		return nil, err
 	}
 	g.watcher = w
-
-	g.frame++
 
 	entries, err := os.ReadDir(shaderDir)
 	if err != nil {
@@ -128,6 +127,11 @@ func (g *Game) Update() error {
 		ebiten.SetFullscreen(!ebiten.IsFullscreen())
 	}
 
+	cx, cy := ebiten.CursorPosition()
+	g.cursor = []float32{float32(cx), float32(cy)}
+
+	g.frame++
+
 	return nil
 }
 
@@ -142,15 +146,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 	elapsed := float32(time.Since(g.startAt).Seconds())
-	cx, cy := ebiten.CursorPosition()
 
 	op := &ebiten.DrawRectShaderOptions{}
 	op.Uniforms = map[string]any{
 		"Time":       elapsed,
 		"Resolution": []float32{float32(w), float32(h)},
 		"Beat":       beatPhase(g.BPM, g.beatStart),
-		"Cursor":     []float32{float32(cx), float32(cy)},
-		"Frame": 			g.frame,
+		"Cursor":     g.cursor,
+		"Frame":			g.frame,
 		"Random": 		rand.Float32(),
 	}
 	screen.DrawRectShader(w, h, shader, op)
