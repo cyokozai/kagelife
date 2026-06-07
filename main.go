@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,16 +24,18 @@ const (
 	screenHeight = 480
 	shaderDir 	 = "shaders"
 )
- 
+
 
 type Game struct {
 	sm        *shadermgr.Manager
 	watcher   *filewatcher.Watcher
+	cursor 		[]float32
 	startAt   time.Time
-	lastErr   error
 	tapTimes  []time.Time
-	BPM			  float64
 	beatStart time.Time
+	BPM			  float64
+	frame 		int
+	lastErr   error
 }
 
 
@@ -52,6 +55,8 @@ func NewGame() (*Game, error) {
 		return nil, err
 	}
 	g.watcher = w
+
+	g.frame++
 
 	entries, err := os.ReadDir(shaderDir)
 	if err != nil {
@@ -119,6 +124,10 @@ func (g *Game) Update() error {
 		}
 	}
 
+	if inpututil.IsKeyJustPressed(ebiten.KeyF) {
+		ebiten.SetFullscreen(!ebiten.IsFullscreen())
+	}
+
 	return nil
 }
 
@@ -133,12 +142,16 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 	elapsed := float32(time.Since(g.startAt).Seconds())
+	cx, cy := ebiten.CursorPosition()
 
 	op := &ebiten.DrawRectShaderOptions{}
 	op.Uniforms = map[string]any{
 		"Time":       elapsed,
 		"Resolution": []float32{float32(w), float32(h)},
 		"Beat":       beatPhase(g.BPM, g.beatStart),
+		"Cursor":     []float32{float32(cx), float32(cy)},
+		"Frame": 			g.frame,
+		"Random": 		rand.Float32(),
 	}
 	screen.DrawRectShader(w, h, shader, op)
 	
