@@ -1,0 +1,15 @@
+//kage:unit pixels
+package main
+
+var Time float
+var Resolution vec2
+
+// var mat4 MVP;
+// var mat4 MIT;
+// var vec4 diffuse = vec4(1.0);
+// var vec3 wLightDir;
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4, custom vec4) vec4 {
+
+	return vec4(0.0, 1.0, 0.0, 1.0)
+}
