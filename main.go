@@ -139,10 +139,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	screen.DrawRectShader(w, h, shader, op)
 	
+	msg := fmt.Sprintf("BPM: %.1f", g.BPM)
 	if g.lastErr != nil {
-		ebitenutil.DebugPrint(screen, "ERROR: "+g.lastErr.Error())
+		msg += "\nERROR: " + g.lastErr.Error()
 	}
-	ebitenutil.DebugPrint(screen, fmt.Sprintf("BPM: %.1f", g.BPM))
+	ebitenutil.DebugPrint(screen, msg)
 }
 
 
