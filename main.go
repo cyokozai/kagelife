@@ -103,12 +103,15 @@ func (g *Game) Update() error {
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		g.beatStart = time.Now()
-		
+		now := time.Now()
+		if len(g.tapTimes) == 0 {
+			g.beatStart = now
+		}
+
 		if len(g.tapTimes) >= 8 {
-			g.tapTimes = append(g.tapTimes[1:], time.Now())
+			g.tapTimes = append(g.tapTimes[1:], now)
 		} else {
-			g.tapTimes = append(g.tapTimes, time.Now())
+			g.tapTimes = append(g.tapTimes, now)
 		}
 
 		if len(g.tapTimes) >= 2 {
