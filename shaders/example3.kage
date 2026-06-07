@@ -1,0 +1,48 @@
+//kage:unit pixels
+package main
+
+var Time float
+var Resolution vec2
+
+// 複数の正弦波を重ねて荒れた波面の高さを生成する
+func waveH(x float) float {
+	h := sin(x*3.0+Time*0.7) * 0.10   // 大波（うねり）
+	h += sin(x*5.0-Time*0.9+1.0) * 0.07
+	h += sin(x*9.0+Time*1.4+0.5) * 0.04  // 中波
+	h += sin(x*14.0-Time*1.8+2.0) * 0.025
+	h += sin(x*23.0+Time*2.8+1.2) * 0.012 // 小波（細かい乱れ）
+	h += sin(x*37.0-Time*4.0+0.7) * 0.006
+	return 0.5 + h
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	uv := dstPos.xy / Resolution
+	uv = vec2(uv.x, 1.0-uv.y) // Y軸反転（上が空、下が海）
+
+	wh := waveH(uv.x * 2.5)
+	diff := uv.y - wh // 正: 空側、負: 海側
+
+	// 嵐の空: 重い雲のグレー
+	sky := mix(
+		vec4(0.25, 0.28, 0.32, 1.0),
+		vec4(0.40, 0.43, 0.48, 1.0),
+		clamp(diff*3.0, 0.0, 1.0),
+	)
+
+	// 荒れた海: 暗い青
+	sea := mix(
+		vec4(0.04, 0.14, 0.25, 1.0), // 深部
+		vec4(0.06, 0.22, 0.35, 1.0), // 表面
+		clamp(-diff*6.0, 0.0, 1.0),
+	)
+
+	// 波頭の砕波・泡（ホワイトキャップ）
+	foam := exp(-abs(diff) * 35.0)
+	chop := (sin(uv.x*60.0+Time*7.0)*0.5 + 0.5) * (sin(uv.x*43.0-Time*5.5)*0.5 + 0.5)
+	foam *= 0.4 + chop*0.6
+
+	col := mix(sea, sky, step(0.0, diff))
+	col = mix(col, vec4(0.88, 0.93, 0.97, 1.0), clamp(foam, 0.0, 1.0))
+
+	return col
+}
