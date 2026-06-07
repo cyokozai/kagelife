@@ -1,4 +1,4 @@
-module github.com/cyokozai/kagelive
+module github.com/cyokozai/kagelife
 
 go 1.26.2
 

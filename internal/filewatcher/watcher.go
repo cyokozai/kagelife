@@ -9,15 +9,17 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+
 type Watcher struct {
-	Events  <-chan string      // 外部公開: 受信専用チャネル
-	events  chan string        // 内部送信用チャネル
-	raw     chan string        // fsnotify の生イベントを受け取る
-	quit    chan struct{}      // Close() で送る停止シグナル
+	Events  <-chan string     // 外部公開: 受信専用チャネル
+	events  chan string       // 内部送信用チャネル
+	raw     chan string       // fsnotify の生イベントを受け取る
+	quit    chan struct{}     // Close() で送る停止シグナル
 	once    sync.Once         // Close() の二重呼び出し防止
 	delay   time.Duration     // デバウンス間隔
 	watcher *fsnotify.Watcher // goroutine リーク防止のために保持
 }
+
 
 func New(dir string) (*Watcher, error) {
 	fw, err := fsnotify.NewWatcher()
@@ -72,6 +74,7 @@ func New(dir string) (*Watcher, error) {
 	return w, nil
 }
 
+
 func newForTest(delay time.Duration) *Watcher {
 	events := make(chan string, 8)
 	w := &Watcher{
@@ -86,6 +89,7 @@ func newForTest(delay time.Duration) *Watcher {
 	return w
 }
 
+
 func (w *Watcher) Close() {
 	w.once.Do(func() {
 		close(w.quit)
@@ -95,8 +99,15 @@ func (w *Watcher) Close() {
 	})
 }
 
+
 func (w *Watcher) debounceLoop() {
+	type firedMsg struct {
+		path  string
+		timer *time.Timer
+	}
 	timers := map[string]*time.Timer{}
+	fired := make(chan firedMsg, 16)
+
 	for {
 		select {
 		case path := <-w.raw:
@@ -104,12 +115,23 @@ func (w *Watcher) debounceLoop() {
 				t.Stop()
 			}
 			p := path
-			timers[path] = time.AfterFunc(w.delay, func() {
+			var t *time.Timer
+			t = time.AfterFunc(w.delay, func() {
 				select {
 				case w.events <- p:
 				case <-w.quit:
 				}
+				select {
+				case fired <- firedMsg{path: p, timer: t}:
+				default:
+				}
 			})
+			timers[path] = t
+
+		case msg := <-fired:
+			if timers[msg.path] == msg.timer {
+				delete(timers, msg.path)
+			}
 
 		case <-w.quit:
 			for _, t := range timers {

@@ -31,10 +31,10 @@ RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/i
     | sh -s -- -b "$(go env GOPATH)/bin" v1.64.8
 
 # delve (デバッガ)
-RUN go install github.com/go-delve/delve/cmd/dlv@latest
+RUN go install github.com/go-delve/delve/cmd/dlv@v1.23.1
 
 # gopls (Language Server)
-RUN go install golang.org/x/tools/gopls@latest
+RUN go install golang.org/x/tools/gopls@v0.16.2
 
 WORKDIR /workspace
 

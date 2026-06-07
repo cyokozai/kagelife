@@ -1,4 +1,4 @@
-# PRD: KageLive
+# PRD: KageLife
 
 **バージョン**: 0.1
 **作成日**: 2026-04-18
@@ -9,7 +9,7 @@
 
 ## 1. エグゼクティブサマリー
 
-KageLiveは、Ebitengine/Kageシェーダーをファイル保存だけでリアルタイム反映し、
+KageLifeは、Ebitengine/Kageシェーダーをファイル保存だけでリアルタイム反映し、
 キーボードで瞬時に切り替えられる、Go開発者のためのVJライブコーディングツール。
 
 外部エディタ（VS Code / Neovim等）でKageシェーダーを編集・保存すると、

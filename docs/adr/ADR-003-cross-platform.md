@@ -38,7 +38,7 @@ Ebitengineは`GOOS=js GOARCH=wasm`でWASMビルドに対応している。
 **選択肢 A（ネイティブバイナリのみ）を採用する。WASMはV2以降。**
 
 ### 理由
-ホットリロードはKageLiveのコア価値であり、WASMとは根本的に相性が悪い。
+ホットリロードはKageLifeのコア価値であり、WASMとは根本的に相性が悪い。
 Goのクロスコンパイルで macOS arm64/amd64 + Linux amd64/arm64 の4バイナリを
 GitHub Actionsで自動生成すれば、実用的なクロスプラットフォーム対応は達成できる。
 

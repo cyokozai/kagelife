@@ -42,17 +42,17 @@ jobs:
           - { goos: linux,   goarch: amd64 }
           - { goos: linux,   goarch: arm64 }
     steps:
-      - go build -o kagelive-${{ matrix.goos }}-${{ matrix.goarch }}
+      - go build -o kagelife-${{ matrix.goos }}-${{ matrix.goarch }}
   
   release:
     needs: build
     steps:
       - gh release create ${{ github.ref_name }}
           --generate-notes
-          kagelive-darwin-arm64
-          kagelive-darwin-amd64
-          kagelive-linux-amd64
-          kagelive-linux-arm64
+          kagelife-darwin-arm64
+          kagelife-darwin-amd64
+          kagelife-linux-amd64
+          kagelife-linux-arm64
 ```
 
 ### リリースノート分類（.github/release.yml）

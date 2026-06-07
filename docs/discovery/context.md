@@ -4,15 +4,15 @@ title: Context
 date: 2026-04-18
 ---
 
-# Phase 0: Context — KageLive
+# Phase 0: Context — KageLife
 
 ## プロジェクト概要
 
 | 項目 | 内容 |
 |------|------|
-| **アプリ名** | KageLive（KodeLifeにちなんで命名） |
+| **アプリ名** | KageLife（KodeLifeにちなんで命名） |
 | **概要** | Ebitengine + Kageシェーダーを使ったVJ向けリアルタイムコーディングツール |
-| **リポジトリ** | https://github.com/cyokozai/kagelive |
+| **リポジトリ** | https://github.com/cyokozai/kagelife |
 
 ## コンテキスト
 

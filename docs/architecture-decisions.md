@@ -1,4 +1,4 @@
-# アーキテクチャ設計書: KageLive
+# アーキテクチャ設計書: KageLife
 
 **作成日**: 2026-04-18
 
@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart TD
-    subgraph "KageLive プロセス"
+    subgraph "KageLife プロセス"
         MAIN["main.go\nEbitengine起動・設定"]
         GAME["Game struct\nebiten.Game実装\nUpdate / Draw / Layout"]
         SM["ShaderManager\n*ebiten.Shaderの管理\nロード・切替・Dispose"]
@@ -57,9 +57,9 @@ sequenceDiagram
     loop 毎フレーム (60fps)
         UPD->>CH: select (non-blocking)
         alt ReloadEventあり
-            CH-->>UPD: ReloadEvent
-            UPD->>SM: Reload(path)
-            SM->>SM: os.ReadFile(path)
+            CH-->>UPD: path (string)
+            UPD->>UPD: os.ReadFile(path)
+            UPD->>SM: Reload(path, src)
             SM->>SM: ebiten.NewShader(src)
             alt コンパイル成功
                 SM->>SM: old.Dispose()
@@ -80,13 +80,16 @@ sequenceDiagram
 ## パッケージ構成
 
 ```
-kagelive/
-├── main.go               # エントリーポイント。設定読み込み・ebiten.RunGame
-├── game.go               # Game struct (Update/Draw/Layout)
-├── shader_manager.go     # ShaderManager: ロード・切替・Dispose
-├── watcher.go            # FileWatcher: fsnotify goroutine + デバウンス
-├── uniform.go            # UniformBuilder: Time/Resolution注入
-├── shaders/              # ユーザーが編集する .kage ファイル置き場
+kagelife/
+├── main.go                        # エントリーポイント・Game struct (Update/Draw/Layout)
+├── internal/
+│   ├── shadermgr/
+│   │   ├── manager.go             # Manager: ロード・切替・Dispose（ebiten非依存）
+│   │   └── manager_test.go
+│   └── filewatcher/
+│       ├── watcher.go             # Watcher: fsnotify goroutine + デバウンス
+│       └── watcher_test.go
+├── shaders/                       # ユーザーが編集する .kage ファイル置き場
 │   └── example.kage
 ├── docs/
 │   ├── prd.md
