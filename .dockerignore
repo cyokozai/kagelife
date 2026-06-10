@@ -1,0 +1,15 @@
+.git
+*.test
+*.out
+# ビルド成果物
+kagelive
+kagelive-*
+# シークレット類
+.env
+.env.*
+*.tfvars
+*credentials*.json
+*secret*.json
+*token*.json
+# OS
+.DS_Store
