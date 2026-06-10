@@ -171,6 +171,13 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 }
 
 
+func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
+	s := ebiten.DeviceScaleFactor()
+
+	return outsideWidth * s, outsideHeight * s
+}
+
+
 func calcBPM(taps []time.Time) float64 {
 	sum_intervals := 0.0
 	average       := 0.0
@@ -201,6 +208,7 @@ func beatPhase(bpm float64, beatStart time.Time) float32 {
 
 func main() {
 	ebiten.SetWindowSize(screenWidth, screenHeight)
+	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowTitle("KageLife")
 
 	g, err := NewGame()
@@ -208,7 +216,7 @@ func main() {
 		log.Fatal(err)
 	}
 	opts := &ebiten.RunGameOptions{
-		ScreenTransparent: true,
+		// ScreenTransparent: true,
 	}
 	if err := ebiten.RunGameWithOptions(g, opts); err != nil && !errors.Is(err, ebiten.Termination) {
 		log.Fatal(err)
