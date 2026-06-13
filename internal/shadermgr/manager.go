@@ -3,22 +3,32 @@ package shadermgr
 import (
 	"fmt"
 	"os"
+	"time"
 )
 
 
-type Shader interface {
-	Dispose()
-}
+var FadePresets = []float32{ 0.5, 1, 2, 3, 4, 8, 16 }
+
+
+const DefaultFadeBeatsIdx = 4
 
 
 type ShaderCompiler func(src []byte) (Shader, error)
 
 
+type Shader interface { Dispose() }
+
+
 type Manager struct {
-	shaders  []Shader       // ロード済みシェーダー
-	names    []string       // ファイル名（表示用）
-	active   int            // 現在アクティブなインデックス
-	Compiler ShaderCompiler // コンパイル関数（差し替え可）
+	shaders 		 []Shader       // ロード済みシェーダー
+	names   		 []string       // ファイル名
+	activeAIdx 	 int            // 現在アクティブなインデックス A
+	activeBIdx 	 int						// 現在アクティブなインデックス B
+	fadeBeatsIdx int 						// フェードイン/アウトにかかる拍数カウント
+	mixRatio		 float32				// 
+	fading 			 bool						// 
+	fadeStart 	 time.Time			// 
+	Compiler 		 ShaderCompiler // コンパイル関数
 }
 
 
@@ -63,7 +73,7 @@ func (m *Manager) Reload(path string, src []byte) error {
 
 func (m *Manager) Switch(index int) {
 	if index >= 0 && index < len(m.shaders) {
-		m.active = index
+		m.activeAIdx = index
 	}
 }
 
@@ -73,12 +83,12 @@ func (m *Manager) Active() Shader {
 		return nil
 	}
 
-	return m.shaders[m.active]
+	return m.shaders[m.activeAIdx]
 }
 
 
 func (m *Manager) ActiveIndex() int {
-	return m.active
+	return m.activeAIdx
 }
 
 
@@ -88,7 +98,84 @@ func (m *Manager) Len() int {
 
 
 func (m *Manager) Names() []string {
-	return append([]string(nil), m.names...) // コピーを返す
+	return append([]string(nil), m.names...)
+}
+
+
+func (m *Manager) ActiveB() Shader {
+    if m.activeBIdx < 0 || m.activeBIdx >= len(m.shaders) {
+        return nil
+    }
+    
+    return m.shaders[m.activeBIdx]
+}
+
+
+func (m *Manager) Fading() bool {
+	return m.fading
+}
+
+
+func (m *Manager) MixRatio() float32 {
+	return m.mixRatio
+}
+
+
+func (m *Manager) BeginFade(idx int) {
+  if idx < 0 || idx >= len(m.shaders) {
+    return
+  }
+  if idx == m.activeAIdx && !m.fading {
+    return
+  }
+  m.activeBIdx = idx
+  m.fadeStart = time.Now()
+  m.fading = true
+  m.mixRatio = 0
+}
+
+
+func (m *Manager) Tick(bpm float64) {
+  if !m.fading || bpm <= 0 {
+    return
+  }
+  
+  beats := float64(FadePresets[m.fadeBeatsIdx])
+  fadeDuration := beats * 60.0 / bpm
+  if fadeDuration <= 0 {
+    return
+  }
+  
+  elapsed := time.Since(m.fadeStart).Seconds()
+  ratio := elapsed / fadeDuration
+  if ratio >= 1.0 {
+    m.activeAIdx = m.activeBIdx
+    m.activeBIdx = -1
+    m.fading = false
+    m.mixRatio = 0
+    
+    return
+  }
+  m.mixRatio = float32(ratio)
+}
+
+
+func (m *Manager) FadeBeats() float32 {
+	return FadePresets[m.fadeBeatsIdx]
+}
+
+
+func (m *Manager) IncFadeBeats() {
+  if m.fadeBeatsIdx < len(FadePresets)-1 {
+    m.fadeBeatsIdx++
+  }
+}
+
+
+func (m *Manager) DecFadeBeats() {
+  if m.fadeBeatsIdx > 0 {
+    m.fadeBeatsIdx--
+  }
 }
 
 

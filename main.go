@@ -1,20 +1,26 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
 	"math"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+	"image/color"
 
 	"github.com/cyokozai/kagelife/internal/filewatcher"
 	"github.com/cyokozai/kagelife/internal/shadermgr"
+
+	"golang.org/x/image/font/gofont/goregular"
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	// "github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 
@@ -29,11 +35,18 @@ type Game struct {
 	sm        *shadermgr.Manager
 	watcher   *filewatcher.Watcher
 	startAt   time.Time
-	lastErr   error
-	tapTimes  []time.Time
-	BPM			  float64
 	beatStart time.Time
+	tapTimes  []time.Time
+	showHUD 	bool
+  hudSize		float64
+	BPM			  float64
+	cursor    []float32
+	frame     int
+	lastErr   error
 }
+
+
+var hudFaceSource *text.GoTextFaceSource
 
 
 func ebitenCompiler(src []byte) (shadermgr.Shader, error) {
@@ -45,6 +58,8 @@ func NewGame() (*Game, error) {
 	g := &Game{
 		sm:      shadermgr.New(ebitenCompiler),
 		startAt: time.Now(),
+		showHUD: true,
+		hudSize: 20,
 	}
 
 	w, err := filewatcher.New(shaderDir)
@@ -98,7 +113,11 @@ func (g *Game) Update() error {
 
 	for i := 0; i < g.sm.Len() && i < 9; i++ {
 		if inpututil.IsKeyJustPressed(ebiten.Key1 + ebiten.Key(i)) {
-			g.sm.Switch(i)
+			if inpututil.IsKeyJustPressed(ebiten.KeyShift) {
+				g.sm.BeginFade(i)
+			} else {
+				g.sm.Switch(i)
+			}
 		}
 	}
 
@@ -119,6 +138,29 @@ func (g *Game) Update() error {
 		}
 	}
 
+	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
+    g.sm.DecFadeBeats()
+  }
+  
+  if inpututil.IsKeyJustPressed(ebiten.KeyBracketRight) {
+    g.sm.IncFadeBeats()
+  }
+
+  if inpututil.IsKeyJustPressed(ebiten.KeyH) {
+  	g.showHUD = !g.showHUD
+  }
+
+  g.sm.Tick(g.BPM)
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyF) {
+		ebiten.SetFullscreen(!ebiten.IsFullscreen())
+	}
+
+	cx, cy := ebiten.CursorPosition()
+	g.cursor = []float32{float32(cx), float32(cy)}
+
+	g.frame++
+
 	return nil
 }
 
@@ -130,23 +172,52 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 
 	screen.Clear()
-
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 	elapsed := float32(time.Since(g.startAt).Seconds())
-
-	op := &ebiten.DrawRectShaderOptions{}
-	op.Uniforms = map[string]any{
+	
+	uniforms := map[string]any{
 		"Time":       elapsed,
 		"Resolution": []float32{float32(w), float32(h)},
 		"Beat":       beatPhase(g.BPM, g.beatStart),
+    "Cursor":     g.cursor,
+    "Frame":      g.frame,
+    "Random":     rand.Float32(),
 	}
-	screen.DrawRectShader(w, h, shader, op)
+	opA := &ebiten.DrawRectShaderOptions{}
+	screen.DrawRectShader(w, h, shader, opA)
+
+	if g.sm.Fading() {
+		if shaderB, ok := g.sm.ActiveB().(*ebiten.Shader); ok && shaderB != nil {
+			opB := &ebiten.DrawRectShaderOptions{Uniforms: uniforms}
+      opB.ColorScale.ScaleAlpha(g.sm.MixRatio())
+      screen.DrawRectShader(w, h, shaderB, opB)
+		}
+	}
+
+	if g.showHUD {
+		msg := fmt.Sprintf("BPM: %.1f  FadeBeats: %.1f  Mix: %.2f", g.BPM, g.sm.FadeBeats(), g.sm.MixRatio())
+		if g.lastErr != nil {
+			msg += "\nERROR: " + g.lastErr.Error()
+		}
+		
+    face := &text.GoTextFace{Source: hudFaceSource, Size: g.hudSize}
+    shadow := &text.DrawOptions{}
+    shadow.GeoM.Translate(10, 10)
+    shadow.ColorScale.ScaleWithColor(color.RGBA{0, 0, 0, 200})
+    text.Draw(screen, msg, face, shadow)
+
+    op := &text.DrawOptions{}
+    op.GeoM.Translate(8, 8)
+    op.ColorScale.ScaleWithColor(color.White)
+    text.Draw(screen, msg, face, op)
+	}
+}
+
+
+func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
+	s := ebiten.Monitor().DeviceScaleFactor()
 	
-	msg := fmt.Sprintf("BPM: %.1f", g.BPM)
-	if g.lastErr != nil {
-		msg += "\nERROR: " + g.lastErr.Error()
-	}
-	ebitenutil.DebugPrint(screen, msg)
+	return outsideWidth * s, outsideHeight * s
 }
 
 
@@ -156,20 +227,21 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 
 func calcBPM(taps []time.Time) float64 {
-	sum_intervals := 0.0
-	average       := 0.0
-	for i := 1; i < len(taps); i++ {
-		sum_intervals += taps[i].Sub(taps[i-1]).Seconds()
-	}
-	
-	if len(taps) > 1 && sum_intervals > 0 {
-		average = sum_intervals / float64(len(taps)-1)
-
-		return 60.0 / average
-	} else {
-		return 0.0
-	}
+  if len(taps) < 2 {
+    return 0.0
+  }
+  
+  var sum float64
+  for i := 1; i < len(taps); i++ {
+    sum += taps[i].Sub(taps[i-1]).Seconds()
+  }
+  if sum <= 0 {
+    return 0.0
+  }
+  
+  return 60.0 / (sum / float64(len(taps)-1))
 }
+
 
 func beatPhase(bpm float64, beatStart time.Time) float32 {
 	if bpm <= 0 {
@@ -183,18 +255,26 @@ func beatPhase(bpm float64, beatStart time.Time) float32 {
 	return float32(phase)
 }
 
+
+func init() {
+	s, err := text.NewGoTextFaceSource(bytes.NewReader(goregular.TTF))
+	if err != nil {
+		log.Fatal(err)
+	}
+	hudFaceSource = s
+}
+
+
 func main() {
 	ebiten.SetWindowSize(screenWidth, screenHeight)
+	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowTitle("KageLife")
 
 	g, err := NewGame()
 	if err != nil {
 		log.Fatal(err)
 	}
-	opts := &ebiten.RunGameOptions{
-		ScreenTransparent: true,
-	}
-	if err := ebiten.RunGameWithOptions(g, opts); err != nil && !errors.Is(err, ebiten.Termination) {
-		log.Fatal(err)
-	}
+	if err := ebiten.RunGame(g); err != nil && !errors.Is(err, ebiten.Termination) {
+    log.Fatal(err)
+  }
 }
