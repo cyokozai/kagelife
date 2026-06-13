@@ -20,8 +20,8 @@ go.work
 go.work.sum
 
 # ビルド成果物
-kagelive
-kagelive-*
+kagelife
+kagelife-*
 
 
 # ============================== Terraform ============================== #
