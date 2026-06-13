@@ -1,0 +1,27 @@
+//kage:unit pixels
+package main
+
+var Time float
+var Beat float
+var Resolution vec2
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	uv := dstPos.xy / Resolution
+	uv = uv*2.0 - 1.0
+	uv.x *= Resolution.x / Resolution.y
+
+	r := length(uv)
+	a := atan(uv.y, uv.x)
+
+	sectors := 6.0
+	a = mod(a, 6.2831853/sectors)
+	a = abs(a - 3.1415926/sectors)
+
+	petal := sin(r*8.0 - Time*2.0 + a*4.0)
+	petal = smoothstep(0.0, 1.0, petal)
+
+	col := mix(vec3(0.08, 0.04, 0.18), vec3(1.0, 0.7, 0.2), petal)
+	col *= 1.0 - r*0.4
+	col *= 1.0 + (1.0-Beat)*0.35
+	return vec4(col, 1.0)
+}

@@ -1,0 +1,16 @@
+//kage:unit pixels
+package main
+
+var Time float
+var Beat float
+var Resolution vec2
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	uv := dstPos.xy/Resolution - 0.5
+	uv.x *= Resolution.x / Resolution.y
+	d := length(uv)
+
+	radius := 0.22 + sin(Time*2.0)*0.04 + (1.0-Beat)*0.06
+	c := 1.0 - smoothstep(radius-0.015, radius+0.015, d)
+	return vec4(c*0.4, c*0.85, c, 1.0)
+}
