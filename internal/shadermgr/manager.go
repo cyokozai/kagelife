@@ -33,7 +33,11 @@ type Manager struct {
 
 
 func New(compiler ShaderCompiler) *Manager {
-	return &Manager{Compiler: compiler}
+	return &Manager{
+		Compiler:     compiler,
+		activeBIdx:   -1,
+		fadeBeatsIdx: DefaultFadeBeatsIdx,
+	}
 }
 
 
@@ -72,9 +76,13 @@ func (m *Manager) Reload(path string, src []byte) error {
 
 
 func (m *Manager) Switch(index int) {
-	if index >= 0 && index < len(m.shaders) {
-		m.activeAIdx = index
+	if index < 0 || index >= len(m.shaders) {
+		return
 	}
+	m.activeAIdx = index
+	m.activeBIdx = -1
+	m.fading = false
+	m.mixRatio = 0
 }
 
 
@@ -103,11 +111,11 @@ func (m *Manager) Names() []string {
 
 
 func (m *Manager) ActiveB() Shader {
-    if m.activeBIdx < 0 || m.activeBIdx >= len(m.shaders) {
-        return nil
-    }
-    
-    return m.shaders[m.activeBIdx]
+  if m.activeBIdx < 0 || m.activeBIdx >= len(m.shaders) {
+    return nil
+  }
+  
+  return m.shaders[m.activeBIdx]
 }
 
 

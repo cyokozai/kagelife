@@ -111,9 +111,12 @@ func (g *Game) Update() error {
 	default:
 	}
 
+	shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) ||
+		ebiten.IsKeyPressed(ebiten.KeyShiftRight)
+
 	for i := 0; i < g.sm.Len() && i < 9; i++ {
 		if inpututil.IsKeyJustPressed(ebiten.Key1 + ebiten.Key(i)) {
-			if inpututil.IsKeyJustPressed(ebiten.KeyShift) {
+			if shift {
 				g.sm.BeginFade(i)
 			} else {
 				g.sm.Switch(i)
@@ -183,7 +186,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
     "Frame":      g.frame,
     "Random":     rand.Float32(),
 	}
-	opA := &ebiten.DrawRectShaderOptions{}
+	opA := &ebiten.DrawRectShaderOptions{Uniforms: uniforms}
 	screen.DrawRectShader(w, h, shader, opA)
 
 	if g.sm.Fading() {
@@ -249,8 +252,8 @@ func beatPhase(bpm float64, beatStart time.Time) float32 {
 	}
 
 	beatDuration := 60.0 / bpm
-	elapsed      := time.Since(beatStart).Seconds()
-	phase 			 := math.Mod(elapsed, beatDuration) / beatDuration
+	elapsed := time.Since(beatStart).Seconds()
+	phase := math.Mod(elapsed, beatDuration) / beatDuration
 
 	return float32(phase)
 }
