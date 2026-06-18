@@ -154,3 +154,6 @@ $RECYCLE.BIN/
 
 # Claude local
 .claude/*
+
+# vim
+*.swp
