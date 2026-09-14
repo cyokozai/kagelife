@@ -1,5 +1,5 @@
-MODULE  := github.com/cyokozai/kagelive
-BINARY  := kagelive
+MODULE  := github.com/cyokozai/kagelife
+BINARY  := kagelife
 OUT_DIR := dist
 
 # ── ビルドフラグ ───────────────────────────────────────────────
