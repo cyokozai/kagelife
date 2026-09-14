@@ -13,12 +13,12 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 	c := cos(Time * 0.4)
 	s := sin(Time * 0.4)
 	rot := mat2(c, s, -s, c)
-	uv = rot * uv * 4.0
+	uv = rot * uv * 16.0
 
 	g := abs(fract(uv) - 0.5)
 	line := smoothstep(0.48, 0.5, max(g.x, g.y))
 
 	col := vec3(line) * vec3(1.0, 0.35, 0.7)
-	col += (1.0 - Beat) * vec3(0.1, 0.05, 0.15)
+	col += (1.0 - Beat * 4) * vec3(0.1, 0.05, 0.15)
 	return vec4(col, 1.0)
 }
