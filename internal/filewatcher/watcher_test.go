@@ -55,8 +55,9 @@ func TestNew_InitialState(t *testing.T) {
 // TestDebounce_SingleEvent は単一イベントがそのまま Events に届くことを確認する。
 //
 // シナリオ:
-//   raw ← "shaders/a.kage"
-//   delay(50ms) 経過後 → Events に "shaders/a.kage" が届く
+//
+//	raw ← "shaders/a.kage"
+//	delay(50ms) 経過後 → Events に "shaders/a.kage" が届く
 func TestDebounce_SingleEvent(t *testing.T) {
 	const delay = 50 * time.Millisecond
 	w := newForTest(delay)
@@ -77,10 +78,11 @@ func TestDebounce_SingleEvent(t *testing.T) {
 // TestDebounce_CoalescesWithinWindow はウィンドウ内の複数イベントが1つにまとめられることを確認する。
 //
 // シナリオ（VJ中に editor が複数回 Write イベントを発火する状況）:
-//   raw ← "a.kage" (t=0)
-//   raw ← "a.kage" (t=10ms)  ← ウィンドウ内: タイマーリセット
-//   raw ← "a.kage" (t=20ms)  ← ウィンドウ内: タイマーリセット
-//   delay(50ms) 経過後 → Events に "a.kage" が 1 回だけ届く
+//
+//	raw ← "a.kage" (t=0)
+//	raw ← "a.kage" (t=10ms)  ← ウィンドウ内: タイマーリセット
+//	raw ← "a.kage" (t=20ms)  ← ウィンドウ内: タイマーリセット
+//	delay(50ms) 経過後 → Events に "a.kage" が 1 回だけ届く
 func TestDebounce_CoalescesWithinWindow(t *testing.T) {
 	const delay = 50 * time.Millisecond
 	w := newForTest(delay)
@@ -107,10 +109,11 @@ func TestDebounce_CoalescesWithinWindow(t *testing.T) {
 // TestDebounce_SeparateEventsAfterWindow はウィンドウ外のイベントが別々に届くことを確認する。
 //
 // シナリオ（1ファイルを2回保存する状況）:
-//   raw ← "a.kage" (t=0)
-//   delay(50ms) 経過 → Events に "a.kage"（1回目）
-//   raw ← "a.kage" (t=200ms)  ← 新しいウィンドウ
-//   delay(50ms) 経過 → Events に "a.kage"（2回目）
+//
+//	raw ← "a.kage" (t=0)
+//	delay(50ms) 経過 → Events に "a.kage"（1回目）
+//	raw ← "a.kage" (t=200ms)  ← 新しいウィンドウ
+//	delay(50ms) 経過 → Events に "a.kage"（2回目）
 func TestDebounce_SeparateEventsAfterWindow(t *testing.T) {
 	const delay = 30 * time.Millisecond
 	w := newForTest(delay)
@@ -130,9 +133,10 @@ func TestDebounce_SeparateEventsAfterWindow(t *testing.T) {
 // TestDebounce_DifferentFiles は異なるファイルのイベントが個別に届くことを確認する。
 //
 // シナリオ（2つのシェーダーファイルをほぼ同時に保存）:
-//   raw ← "a.kage"
-//   raw ← "b.kage"
-//   → Events に "a.kage" と "b.kage" がそれぞれ届く（順不同）
+//
+//	raw ← "a.kage"
+//	raw ← "b.kage"
+//	→ Events に "a.kage" と "b.kage" がそれぞれ届く（順不同）
 func TestDebounce_DifferentFiles(t *testing.T) {
 	const delay = 30 * time.Millisecond
 	w := newForTest(delay)

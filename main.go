@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"image/color"
 	"log"
 	"math"
 	"math/rand/v2"
@@ -11,25 +12,22 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"image/color"
 
 	"github.com/cyokozai/kagelife/internal/filewatcher"
 	"github.com/cyokozai/kagelife/internal/shadermgr"
 
-	"golang.org/x/image/font/gofont/goregular"
 	"github.com/hajimehoshi/ebiten/v2"
+	"golang.org/x/image/font/gofont/goregular"
 	// "github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
-
 const (
 	screenWidth  = 640
 	screenHeight = 480
-	shaderDir 	 = "shaders"
+	shaderDir    = "shaders"
 )
- 
 
 type Game struct {
 	sm        *shadermgr.Manager
@@ -37,22 +35,19 @@ type Game struct {
 	startAt   time.Time
 	beatStart time.Time
 	tapTimes  []time.Time
-	showHUD 	bool
-  hudSize		float64
-	BPM			  float64
+	showHUD   bool
+	hudSize   float64
+	BPM       float64
 	cursor    []float32
 	frame     int
 	lastErr   error
 }
 
-
 var hudFaceSource *text.GoTextFaceSource
-
 
 func ebitenCompiler(src []byte) (shadermgr.Shader, error) {
 	return ebiten.NewShader(src)
 }
-
 
 func NewGame() (*Game, error) {
 	g := &Game{
@@ -88,7 +83,6 @@ func NewGame() (*Game, error) {
 	return g, nil
 }
 
-
 func (g *Game) Update() error {
 	select {
 	case path := <-g.watcher.Events:
@@ -96,7 +90,7 @@ func (g *Game) Update() error {
 		if err != nil {
 			log.Printf("error: failed to read %s: %v", path, err)
 			g.lastErr = err
-			
+
 			break
 		}
 
@@ -142,18 +136,18 @@ func (g *Game) Update() error {
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
-    g.sm.DecFadeBeats()
-  }
-  
-  if inpututil.IsKeyJustPressed(ebiten.KeyBracketRight) {
-    g.sm.IncFadeBeats()
-  }
+		g.sm.DecFadeBeats()
+	}
 
-  if inpututil.IsKeyJustPressed(ebiten.KeyH) {
-  	g.showHUD = !g.showHUD
-  }
+	if inpututil.IsKeyJustPressed(ebiten.KeyBracketRight) {
+		g.sm.IncFadeBeats()
+	}
 
-  g.sm.Tick(g.BPM)
+	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
+		g.showHUD = !g.showHUD
+	}
+
+	g.sm.Tick(g.BPM)
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyF) {
 		ebiten.SetFullscreen(!ebiten.IsFullscreen())
@@ -167,7 +161,6 @@ func (g *Game) Update() error {
 	return nil
 }
 
-
 func (g *Game) Draw(screen *ebiten.Image) {
 	shader, ok := g.sm.Active().(*ebiten.Shader)
 	if !ok || shader == nil {
@@ -177,14 +170,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	screen.Clear()
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 	elapsed := float32(time.Since(g.startAt).Seconds())
-	
+
 	uniforms := map[string]any{
 		"Time":       elapsed,
 		"Resolution": []float32{float32(w), float32(h)},
 		"Beat":       beatPhase(g.BPM, g.beatStart),
-    "Cursor":     g.cursor,
-    "Frame":      g.frame,
-    "Random":     rand.Float32(),
+		"Cursor":     g.cursor,
+		"Frame":      g.frame,
+		"Random":     rand.Float32(),
 	}
 	opA := &ebiten.DrawRectShaderOptions{Uniforms: uniforms}
 	screen.DrawRectShader(w, h, shader, opA)
@@ -192,8 +185,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.sm.Fading() {
 		if shaderB, ok := g.sm.ActiveB().(*ebiten.Shader); ok && shaderB != nil {
 			opB := &ebiten.DrawRectShaderOptions{Uniforms: uniforms}
-      opB.ColorScale.ScaleAlpha(g.sm.MixRatio())
-      screen.DrawRectShader(w, h, shaderB, opB)
+			opB.ColorScale.ScaleAlpha(g.sm.MixRatio())
+			screen.DrawRectShader(w, h, shaderB, opB)
 		}
 	}
 
@@ -202,49 +195,45 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		if g.lastErr != nil {
 			msg += "\nERROR: " + g.lastErr.Error()
 		}
-		
-    face := &text.GoTextFace{Source: hudFaceSource, Size: g.hudSize}
-    shadow := &text.DrawOptions{}
-    shadow.GeoM.Translate(10, 10)
-    shadow.ColorScale.ScaleWithColor(color.RGBA{0, 0, 0, 200})
-    text.Draw(screen, msg, face, shadow)
 
-    op := &text.DrawOptions{}
-    op.GeoM.Translate(8, 8)
-    op.ColorScale.ScaleWithColor(color.White)
-    text.Draw(screen, msg, face, op)
+		face := &text.GoTextFace{Source: hudFaceSource, Size: g.hudSize}
+		shadow := &text.DrawOptions{}
+		shadow.GeoM.Translate(10, 10)
+		shadow.ColorScale.ScaleWithColor(color.RGBA{0, 0, 0, 200})
+		text.Draw(screen, msg, face, shadow)
+
+		op := &text.DrawOptions{}
+		op.GeoM.Translate(8, 8)
+		op.ColorScale.ScaleWithColor(color.White)
+		text.Draw(screen, msg, face, op)
 	}
 }
 
-
 func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 	s := ebiten.Monitor().DeviceScaleFactor()
-	
+
 	return outsideWidth * s, outsideHeight * s
 }
-
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return screenWidth, screenHeight
 }
 
-
 func calcBPM(taps []time.Time) float64 {
-  if len(taps) < 2 {
-    return 0.0
-  }
-  
-  var sum float64
-  for i := 1; i < len(taps); i++ {
-    sum += taps[i].Sub(taps[i-1]).Seconds()
-  }
-  if sum <= 0 {
-    return 0.0
-  }
-  
-  return 60.0 / (sum / float64(len(taps)-1))
-}
+	if len(taps) < 2 {
+		return 0.0
+	}
 
+	var sum float64
+	for i := 1; i < len(taps); i++ {
+		sum += taps[i].Sub(taps[i-1]).Seconds()
+	}
+	if sum <= 0 {
+		return 0.0
+	}
+
+	return 60.0 / (sum / float64(len(taps)-1))
+}
 
 func beatPhase(bpm float64, beatStart time.Time) float32 {
 	if bpm <= 0 {
@@ -258,7 +247,6 @@ func beatPhase(bpm float64, beatStart time.Time) float32 {
 	return float32(phase)
 }
 
-
 func init() {
 	s, err := text.NewGoTextFaceSource(bytes.NewReader(goregular.TTF))
 	if err != nil {
@@ -266,7 +254,6 @@ func init() {
 	}
 	hudFaceSource = s
 }
-
 
 func main() {
 	ebiten.SetWindowSize(screenWidth, screenHeight)
@@ -278,6 +265,6 @@ func main() {
 		log.Fatal(err)
 	}
 	if err := ebiten.RunGame(g); err != nil && !errors.Is(err, ebiten.Termination) {
-    log.Fatal(err)
-  }
+		log.Fatal(err)
+	}
 }
