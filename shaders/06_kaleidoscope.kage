@@ -11,7 +11,7 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 	uv.x *= Resolution.x / Resolution.y
 
 	r := length(uv)
-	a := atan(uv.y, uv.x)
+	a := atan2(uv.y, uv.x)
 
 	sectors := 6.0
 	a = mod(a, 6.2831853/sectors)
