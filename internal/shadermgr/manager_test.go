@@ -13,6 +13,7 @@ import (
 // fakeShader はテスト用のダミーシェーダー。
 // shadermgr.Shader インターフェース（Dispose()）を実装している。
 type fakeShader struct {
+	name     string
 	disposed bool
 }
 
