@@ -1,6 +1,7 @@
 package filewatcher
 
 import (
+	"errors"
 	"log"
 	"strings"
 	"sync"
@@ -27,8 +28,7 @@ func New(dir string) (*Watcher, error) {
 
 	if err = fw.Add(dir); err != nil {
 		log.Println(err)
-		fw.Close()
-		return nil, err
+		return nil, errors.Join(err, fw.Close())
 	}
 
 	events := make(chan string, 8)
@@ -90,7 +90,9 @@ func (w *Watcher) Close() {
 	w.once.Do(func() {
 		close(w.quit)
 		if w.watcher != nil {
-			w.watcher.Close()
+			if err := w.watcher.Close(); err != nil {
+				log.Println(err)
+			}
 		}
 	})
 }
