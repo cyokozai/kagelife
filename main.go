@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image/color"
 	"log"
-	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/cyokozai/kagelife/internal/filewatcher"
 	"github.com/cyokozai/kagelife/internal/shadermgr"
+	"github.com/cyokozai/kagelife/internal/tempo"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"golang.org/x/image/font/gofont/goregular"
@@ -30,17 +30,15 @@ const (
 )
 
 type Game struct {
-	sm        *shadermgr.Manager
-	watcher   *filewatcher.Watcher
-	startAt   time.Time
-	beatStart time.Time
-	tapTimes  []time.Time
-	showHUD   bool
-	hudSize   float64
-	BPM       float64
-	cursor    []float32
-	frame     int
-	lastErr   error
+	sm      *shadermgr.Manager
+	watcher *filewatcher.Watcher
+	tapper  *tempo.Tapper
+	startAt time.Time
+	showHUD bool
+	hudSize float64
+	cursor  []float32
+	frame   int
+	lastErr error
 }
 
 var hudFaceSource *text.GoTextFaceSource
@@ -52,6 +50,7 @@ func ebitenCompiler(src []byte) (shadermgr.Shader, error) {
 func NewGame() (*Game, error) {
 	g := &Game{
 		sm:      shadermgr.New(ebitenCompiler),
+		tapper:  tempo.New(2*time.Second, 8),
 		startAt: time.Now(),
 		showHUD: true,
 		hudSize: 20,
@@ -119,20 +118,7 @@ func (g *Game) Update() error {
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		now := time.Now()
-		if len(g.tapTimes) == 0 {
-			g.beatStart = now
-		}
-
-		if len(g.tapTimes) >= 8 {
-			g.tapTimes = append(g.tapTimes[1:], now)
-		} else {
-			g.tapTimes = append(g.tapTimes, now)
-		}
-
-		if len(g.tapTimes) >= 2 {
-			g.BPM = calcBPM(g.tapTimes)
-		}
+		g.tapper.Tap(time.Now())
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
@@ -147,7 +133,7 @@ func (g *Game) Update() error {
 		g.showHUD = !g.showHUD
 	}
 
-	g.sm.Tick(g.BPM)
+	g.sm.Tick(g.tapper.BPM())
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyF) {
 		ebiten.SetFullscreen(!ebiten.IsFullscreen())
@@ -174,7 +160,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	uniforms := map[string]any{
 		"Time":       elapsed,
 		"Resolution": []float32{float32(w), float32(h)},
-		"Beat":       beatPhase(g.BPM, g.beatStart),
+		"Beat":       g.tapper.Phase(time.Now()),
 		"Cursor":     g.cursor,
 		"Frame":      g.frame,
 		"Random":     rand.Float32(),
@@ -191,7 +177,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 
 	if g.showHUD {
-		msg := fmt.Sprintf("BPM: %.1f  FadeBeats: %.1f  Mix: %.2f", g.BPM, g.sm.FadeBeats(), g.sm.MixRatio())
+		msg := fmt.Sprintf("BPM: %.1f  FadeBeats: %.1f  Mix: %.2f", g.tapper.BPM(), g.sm.FadeBeats(), g.sm.MixRatio())
 		if g.lastErr != nil {
 			msg += "\nERROR: " + g.lastErr.Error()
 		}
@@ -217,34 +203,6 @@ func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return screenWidth, screenHeight
-}
-
-func calcBPM(taps []time.Time) float64 {
-	if len(taps) < 2 {
-		return 0.0
-	}
-
-	var sum float64
-	for i := 1; i < len(taps); i++ {
-		sum += taps[i].Sub(taps[i-1]).Seconds()
-	}
-	if sum <= 0 {
-		return 0.0
-	}
-
-	return 60.0 / (sum / float64(len(taps)-1))
-}
-
-func beatPhase(bpm float64, beatStart time.Time) float32 {
-	if bpm <= 0 {
-		return 0.0
-	}
-
-	beatDuration := 60.0 / bpm
-	elapsed := time.Since(beatStart).Seconds()
-	phase := math.Mod(elapsed, beatDuration) / beatDuration
-
-	return float32(phase)
 }
 
 func init() {
