@@ -1,0 +1,88 @@
+# ADR-004 (docs/adr/ADR-004-cicd-release.md) の release.yml（リリース自動化）
+# タグ v*.*.* の push → 関門 (ci.yml) → 4 ターゲットを cgo=1 でネイティブビルド
+# → tar.gz と SHA256SUMS を添えて GitHub Release を作る。
+# タグに "-" を含む（v1.0.0-rc.1 など）ときは prerelease にする。
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+# 既定は権限なし。ジョブごとに必要な最小限だけ与える。
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: gate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: gate
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # darwin は macOS ランナー上で GOARCH を切り替えてビルドする（amd64 はクロスビルド）
+          - { goos: darwin, goarch: arm64, runner: macos-latest }
+          - { goos: darwin, goarch: amd64, runner: macos-latest }
+          - { goos: linux, goarch: amd64, runner: ubuntu-latest }
+          - { goos: linux, goarch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-ebiten
+
+      - name: Package
+        run: make "package-${{ matrix.goos }}-${{ matrix.goarch }}" VERSION="$GITHUB_REF_NAME"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pkg-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # make checksum のために Makefile が要る
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: pkg-*
+          path: dist
+          merge-multiple: true
+
+      - name: SHA256SUMS
+        run: make checksum
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag \
+            "${prerelease[@]}" \
+            dist/*.tar.gz dist/SHA256SUMS
