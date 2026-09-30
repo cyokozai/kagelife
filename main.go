@@ -3,15 +3,20 @@ package main
 import (
 	"bytes"
 	"errors"
+	"flag"
 	"fmt"
 	"image/color"
 	"log"
 	"math/rand/v2"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 
+	"github.com/cyokozai/kagelife/internal/control"
 	"github.com/cyokozai/kagelife/internal/filewatcher"
 	"github.com/cyokozai/kagelife/internal/shadermgr"
 	"github.com/cyokozai/kagelife/internal/tempo"
@@ -26,7 +31,6 @@ import (
 const (
 	screenWidth  = 640
 	screenHeight = 480
-	shaderDir    = "shaders"
 )
 
 type Game struct {
@@ -38,7 +42,9 @@ type Game struct {
 	hudSize float64
 	cursor  []float32
 	frame   int
-	lastErr error
+	eng     *control.Engine // 制御口から名前で操作する VJ 状態（sm と tapper を共有）
+	queue   *control.Queue  // 制御口からの処理。Update で毎 tick 読み切る
+	quit    atomic.Bool     // シグナル受信で立て、次の Update で終了する
 }
 
 var hudFaceSource *text.GoTextFaceSource
@@ -47,13 +53,21 @@ func ebitenCompiler(src []byte) (shadermgr.Shader, error) {
 	return ebiten.NewShader(src)
 }
 
-func NewGame() (*Game, error) {
+// NewGame は shaderDir（絶対パス）のシェーダを読み込んだ Game を作る。
+func NewGame(shaderDir string, queue *control.Queue) (*Game, error) {
 	g := &Game{
 		sm:      shadermgr.New(ebitenCompiler),
 		tapper:  tempo.New(2*time.Second, 8),
 		startAt: time.Now(),
 		showHUD: true,
 		hudSize: 20,
+		queue:   queue,
+	}
+	g.eng = &control.Engine{
+		SM:        g.sm,
+		Tapper:    g.tapper,
+		ShaderDir: shaderDir,
+		FPS:       ebiten.ActualFPS,
 	}
 
 	w, err := filewatcher.New(shaderDir)
@@ -83,26 +97,30 @@ func NewGame() (*Game, error) {
 }
 
 func (g *Game) Update() error {
+	if g.quit.Load() {
+		return ebiten.Termination
+	}
+
 	select {
 	case path := <-g.watcher.Events:
 		src, err := os.ReadFile(path)
 		if err != nil {
 			log.Printf("error: failed to read %s: %v", path, err)
-			g.lastErr = err
+			g.eng.RecordError(control.NameFromPath(path), err.Error())
 
 			break
 		}
 
-		err = g.sm.Reload(path, src)
-		if err != nil {
+		if err := g.eng.ReloadFile(path, src); err != nil {
 			log.Printf("error: failed to reload %s: %v", path, err)
-			g.lastErr = err
 		} else {
 			log.Printf("reloaded shader: %s", path)
-			g.lastErr = nil
 		}
 	default:
 	}
+
+	// 制御口からの処理（状態の読み取り・切替・差し替え）はここでだけ実行する
+	g.queue.Drain(g.eng)
 
 	shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) ||
 		ebiten.IsKeyPressed(ebiten.KeyShiftRight)
@@ -155,6 +173,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	screen.Clear()
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+	g.eng.Resolution = [2]int{w, h}
 	elapsed := float32(time.Since(g.startAt).Seconds())
 
 	uniforms := map[string]any{
@@ -178,8 +197,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	if g.showHUD {
 		msg := fmt.Sprintf("BPM: %.1f  FadeBeats: %.1f  Mix: %.2f", g.tapper.BPM(), g.sm.FadeBeats(), g.sm.MixRatio())
-		if g.lastErr != nil {
-			msg += "\nERROR: " + g.lastErr.Error()
+		if le := g.eng.LastError(); le != nil {
+			msg += "\nERROR: " + le.Message
 		}
 
 		face := &text.GoTextFace{Source: hudFaceSource, Size: g.hudSize}
@@ -218,11 +237,57 @@ func main() {
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowTitle("KageLife")
 
-	g, err := NewGame()
+	shaderDirFlag := flag.String("shaders", "shaders", "シェーダ（*.kage）を置くディレクトリ")
+	controlAddr := flag.String("control-addr", "127.0.0.1:0", "制御口の待受アドレス（ループバックのみ。ポート 0 は空きポート）")
+	flag.Parse()
+
+	if err := run(*shaderDirFlag, *controlAddr); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run は制御口を起動してからゲームを回し、終了時に制御口を閉じて発見ファイルを消す。
+func run(shaderDirArg, controlAddr string) error {
+	shaderDir, err := filepath.Abs(shaderDirArg)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("shader dir: %w", err)
 	}
+
+	queue := control.NewQueue(64)
+	g, err := NewGame(shaderDir, queue)
+	if err != nil {
+		return err
+	}
+	defer g.watcher.Close()
+
+	ctl, err := control.Start(control.Config{
+		Addr:      controlAddr,
+		ShaderDir: shaderDir,
+		Compile:   ebitenCompiler,
+		Queue:     queue,
+	})
+	if err != nil {
+		return err
+	}
+	log.Printf("control: listening on %s (discovery: %s)", ctl.Addr(), ctl.DiscoveryFile())
+	defer func() {
+		if err := ctl.Close(); err != nil {
+			log.Printf("warn: control close: %v", err)
+		}
+	}()
+
+	// Ctrl+C / SIGTERM でも正常終了の経路（発見ファイルの削除）を通す
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
+	go func() {
+		<-sig
+		g.quit.Store(true)
+	}()
+
 	if err := ebiten.RunGame(g); err != nil && !errors.Is(err, ebiten.Termination) {
-		log.Fatal(err)
+		return err
 	}
+
+	return nil
 }
