@@ -1,7 +1,7 @@
-# ADR-001: アーキテクチャパターン — フラットモノリス
+# ADR-001: アーキテクチャパターン — フラットモノリス（2026-09-30 改訂: `main` + `internal/` 3 パッケージ）
 
-**ステータス**: Accepted
-**日付**: 2026-04-18
+**ステータス**: Accepted（2026-09-30 改訂）
+**日付**: 2026-04-18（改訂: 2026-09-30）
 **決定者**: cyokozai
 
 ---
@@ -41,10 +41,29 @@ Ebitengineのゲームループ（`Update/Draw/Layout`）が中心構造を規�
 - チームが1人のまま
 - ファイル数が10を超えたらパッケージ分割を検討する
 
+## 改訂（2026-09-30）: 実装の構成
+
+実装は選択肢 A のフラットな 5 ファイル構成ではなく、`main` パッケージと `internal/` 配下の 3 パッケージに分かれている。
+レイヤー分離（選択肢 B）は採っておらず、単一バイナリ・単一モジュールである点は当初の決定のまま。本 ADR はこの実態を正とする。
+
+| パッケージ | ファイル | 責務 |
+|-----------|---------|------|
+| `main` | `main.go` | `Game`（`Update` / `Draw` / `Layout` / `LayoutF`）、キー入力、Uniform の組み立て、クロスフェードの描画、HUD |
+| `internal/filewatcher` | `watcher.go` | fsnotify による `shaders/` の監視と 100ms のデバウンス（[ADR-002](ADR-002-hotreload-mechanism.md)） |
+| `internal/shadermgr` | `manager.go` | シェーダーのロード・再ロード・切り替え・`Dispose()`、クロスフェードの状態（[ADR-005](ADR-005-crossfade-compositing.md)） |
+| `internal/tempo` | `tapper.go` | タップテンポ（BPM と拍の位相） |
+
+当初案との差分:
+
+- `game.go` は独立させず、`Game` は `main.go` にある
+- `uniform.go`（`UniformBuilder`）は作っておらず、Uniform は `Game.Draw()` の中で組み立てる
+- `shadermgr` は `ebiten` に直接依存しない。コンパイル関数（`ShaderCompiler`）と `Dispose()` だけを持つ `Shader` インタフェースを外から受け取るため、GPU 無しでユニットテストできる
+- 3 つの `internal/` パッケージにはそれぞれ `_test.go` がある
+
 ## 影響・結果
 
-**ポジティブ**: 実装速度が最大化される
-**ネガティブ**: V2でシェーダーレイヤー合成を追加する際にリファクタリングが必要になる可能性
+**ポジティブ**: 実装速度が最大化される。`internal/` の 3 パッケージは Ebitengine のゲームループから切り離してテストできる
+**ネガティブ**: V2でシェーダーレイヤー合成を追加する際にリファクタリングが必要になる可能性（合成の布石は [ADR-005](ADR-005-crossfade-compositing.md) を参照）
 
 **Action Items**:
-- [ ] `game.go`に`ShaderManager`への依存を明示的に持たせる設計にする
+- [x] `Game`に`ShaderManager`への依存を明示的に持たせる設計にする（`Game.sm *shadermgr.Manager`。当初案の `game.go` ではなく `main.go` に置いた）
