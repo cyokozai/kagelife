@@ -21,6 +21,7 @@ import (
 	"github.com/cyokozai/kagelife/internal/filewatcher"
 	"github.com/cyokozai/kagelife/internal/shadermgr"
 	"github.com/cyokozai/kagelife/internal/tempo"
+	"github.com/cyokozai/kagelife/internal/uniform"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"golang.org/x/image/font/gofont/goregular"
@@ -38,7 +39,12 @@ const (
 	maxEventsPerFrame = 16
 	// hudMaxErrors は HUD に並べるエラーの最大件数。超えた分は残り件数だけを出す。
 	hudMaxErrors = 5
+
+	appName = "KageLife"
 )
+
+// version はビルド時に Makefile の -ldflags "-X main.version=..." で上書きされる。
+var version = "dev"
 
 type Game struct {
 	sm      *shadermgr.Manager
@@ -52,10 +58,13 @@ type Game struct {
 	// errs はファイルごとの最新のエラー。再読み込みが成功したファイルだけを消す。
 	errs map[string]error
 
-	// 毎フレームの確保を避けるため、Uniform とそのスライスは使い回す。
-	uniforms   map[string]any
-	resolution []float32
-	cursor     []float32
+	// 毎フレームの確保を避けるため、Uniform の map とスライスは Builder の中で使い回す。
+	uniforms *uniform.Builder
+	cursorX  int
+	cursorY  int
+
+	// title はウィンドウタイトル。名前が変わったときだけ SetWindowTitle を呼ぶ。
+	title titleSetter
 
 	// offscreen はクロスフェードの B 側を描く画面外の画像。画面サイズが変わったときだけ作り直す。
 	offscreen *ebiten.Image
@@ -74,19 +83,15 @@ func ebitenCompiler(src []byte) (shadermgr.Shader, error) {
 // NewGame は shaderDir（絶対パス）のシェーダーを読み込んだ Game を作る。
 func NewGame(shaderDir string, queue *control.Queue) (*Game, error) {
 	g := &Game{
-		sm:         shadermgr.New(ebitenCompiler),
-		tapper:     tempo.New(2*time.Second, 8),
-		startAt:    time.Now(),
-		showHUD:    true,
-		hudSize:    20,
-		errs:       map[string]error{},
-		resolution: make([]float32, 2),
-		cursor:     make([]float32, 2),
-		queue:      queue,
-	}
-	g.uniforms = map[string]any{
-		"Resolution": g.resolution,
-		"Cursor":     g.cursor,
+		sm:       shadermgr.New(ebitenCompiler),
+		tapper:   tempo.New(2*time.Second, 8),
+		startAt:  time.Now(),
+		showHUD:  true,
+		hudSize:  20,
+		errs:     map[string]error{},
+		uniforms: uniform.New(),
+		title:    titleSetter{set: ebiten.SetWindowTitle},
+		queue:    queue,
 	}
 	g.eng = &control.Engine{
 		SM:        g.sm,
@@ -167,6 +172,16 @@ func processEvents(
 	}
 }
 
+// processRemoved は削除されたファイルを remove に渡し、そのファイルのエラーを errs から消す。
+// paths は drainEvents で取り出したもので、閉じたチャネルの零値（空文字列）は含まない。
+func processRemoved(paths []string, remove func(string), errs map[string]error) {
+	for _, path := range paths {
+		remove(path)
+		delete(errs, path)
+		log.Printf("removed shader: %s", path)
+	}
+}
+
 // readShader は os.ReadFile を包み、読み込みに失敗したら制御口の last_error にも記録する。
 // 再コンパイルの失敗は Engine.ReloadFile が自分で記録するが、読み込みの失敗はここを通らないと残らない。
 func (g *Game) readShader(path string) ([]byte, error) {
@@ -205,11 +220,83 @@ func errorLines(errs map[string]error, limit int) []string {
 }
 
 // hudText は HUD に描く文字列を組み立てる。
-func hudText(bpm float64, fadeBeats, mix float32, errs map[string]error) string {
-	lines := []string{fmt.Sprintf("BPM: %.1f  FadeBeats: %.1f  Mix: %.2f", bpm, fadeBeats, mix)}
+// measured が false（タップも set_bpm もしていない既定値）なら、BPM に (default) を付ける。
+func hudText(bpm float64, measured bool, fadeBeats, mix float32, errs map[string]error) string {
+	bpmText := fmt.Sprintf("%.1f", bpm)
+	if !measured {
+		bpmText += " (default)"
+	}
+	lines := []string{fmt.Sprintf("BPM: %s  FadeBeats: %.1f  Mix: %.2f", bpmText, fadeBeats, mix)}
 	lines = append(lines, errorLines(errs, hudMaxErrors)...)
 
 	return strings.Join(lines, "\n")
+}
+
+// windowTitle はウィンドウタイトルを組み立てる。active が空ならアプリ名だけ、
+// フェード中でフェード先があれば「A → B」。
+func windowTitle(active, target string, fading bool) string {
+	if active == "" {
+		return appName
+	}
+	if fading && target != "" {
+		return appName + " - " + active + " → " + target
+	}
+
+	return appName + " - " + active
+}
+
+// titleSetter は前回と違うタイトルのときだけ set を呼ぶ。
+type titleSetter struct {
+	cur string
+	set func(string)
+}
+
+func (t *titleSetter) update(title string) {
+	if title == t.cur {
+		return
+	}
+	t.cur = title
+	t.set(title)
+}
+
+// currentTitle はシェーダーマネージャの状態からウィンドウタイトルを組み立てる。
+func (g *Game) currentTitle() string {
+	names := g.sm.Names()
+	nameAt := func(i int) string {
+		if i < 0 || i >= len(names) {
+			return ""
+		}
+
+		return control.NameFromPath(names[i])
+	}
+
+	return windowTitle(nameAt(g.sm.ActiveIndex()), nameAt(g.sm.FadeTargetIndex()), g.sm.Fading())
+}
+
+// versionString は -version で出す文字列。
+func versionString() string {
+	return "kagelife " + version
+}
+
+// options はコマンドラインの指定。
+type options struct {
+	shaderDir   string
+	controlAddr string
+	version     bool
+}
+
+// parseFlags は args（プログラム名を除く）を解釈する。
+func parseFlags(args []string) (options, error) {
+	var opts options
+	fs := flag.NewFlagSet("kagelife", flag.ContinueOnError)
+	fs.StringVar(&opts.shaderDir, "shaders", "shaders", "シェーダー（*.kage）を置くディレクトリ")
+	fs.StringVar(&opts.controlAddr, "control-addr", "127.0.0.1:0", "制御口の待受アドレス（ループバックのみ。ポート 0 は空きポート）")
+	fs.BoolVar(&opts.version, "version", false, "バージョンを出力して終了する")
+	if err := fs.Parse(args); err != nil {
+		return options{}, err
+	}
+
+	return opts, nil
 }
 
 // shaderListLines はシェーダーの一覧を、キーの 1〜9 と揃えた 1 始まりの番号で組み立てる。
@@ -233,6 +320,7 @@ func (g *Game) Update() error {
 		return ebiten.Termination
 	}
 
+	// drainEvents は v, ok := <-ch で close を確かめるので、Close 後の零値は処理しない。
 	if paths := drainEvents(g.watcher.Events, maxEventsPerFrame); len(paths) > 0 {
 		before := g.sm.Len()
 		// reload を Engine 経由にして、HUD の errs と制御口の last_error の両方を更新する。
@@ -240,6 +328,12 @@ func (g *Game) Update() error {
 		if g.sm.Len() > before {
 			logShaderList(g.sm.Names())
 		}
+	}
+
+	// 削除も Engine 経由にして、スロット・HUD の errs・制御口の last_error を揃えて消す。
+	if paths := drainEvents(g.watcher.Removed, maxEventsPerFrame); len(paths) > 0 {
+		processRemoved(paths, g.eng.RemoveFile, g.errs)
+		logShaderList(g.sm.Names())
 	}
 
 	// 制御口からの処理（状態の読み取り・切替・差し替え）はここでだけ実行する
@@ -280,8 +374,9 @@ func (g *Game) Update() error {
 		ebiten.SetFullscreen(!ebiten.IsFullscreen())
 	}
 
-	cx, cy := ebiten.CursorPosition()
-	g.cursor[0], g.cursor[1] = float32(cx), float32(cy)
+	g.cursorX, g.cursorY = ebiten.CursorPosition()
+
+	g.title.update(g.currentTitle())
 
 	g.frame++
 
@@ -304,13 +399,19 @@ func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
 	g.eng.Resolution = [2]int{w, h}
-	g.resolution[0], g.resolution[1] = float32(w), float32(h)
-	g.uniforms["Time"] = float32(time.Since(g.startAt).Seconds())
-	g.uniforms["Beat"] = g.tapper.Phase(time.Now())
-	g.uniforms["Frame"] = g.frame
-	g.uniforms["Random"] = rand.Float32()
+	now := time.Now()
+	uniforms := g.uniforms.Build(uniform.Input{
+		Time:    float32(now.Sub(g.startAt).Seconds()),
+		Width:   w,
+		Height:  h,
+		Beat:    g.tapper.Phase(now),
+		CursorX: g.cursorX,
+		CursorY: g.cursorY,
+		Frame:   g.frame,
+		Random:  rand.Float32(),
+	})
 
-	opA := &ebiten.DrawRectShaderOptions{Uniforms: g.uniforms}
+	opA := &ebiten.DrawRectShaderOptions{Uniforms: uniforms}
 	screen.DrawRectShader(w, h, shader, opA)
 
 	if !g.sm.Fading() {
@@ -326,7 +427,7 @@ func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) {
 	// ScaleAlpha は RGBA の 4 成分に掛かるので、乗算済みアルファのまま正しく補間される。
 	off := g.offscreenFor(w, h)
 	off.Clear()
-	opB := &ebiten.DrawRectShaderOptions{Uniforms: g.uniforms}
+	opB := &ebiten.DrawRectShaderOptions{Uniforms: uniforms}
 	off.DrawRectShader(w, h, shaderB, opB)
 
 	opMix := &ebiten.DrawImageOptions{}
@@ -352,7 +453,7 @@ func (g *Game) offscreenFor(w, h int) *ebiten.Image {
 // 文字サイズと位置はデバイスの拡大率に合わせる。
 func (g *Game) drawHUD(screen *ebiten.Image) {
 	s := ebiten.Monitor().DeviceScaleFactor()
-	msg := hudText(g.tapper.BPM(), g.sm.FadeBeats(), g.sm.MixRatio(), g.errs)
+	msg := hudText(g.tapper.BPM(), g.tapper.Measured(), g.sm.FadeBeats(), g.sm.MixRatio(), g.errs)
 	face := &text.GoTextFace{Source: hudFaceSource, Size: g.hudSize * s}
 	// text/v2 は LineSpacing が 0 だと改行しても行が重なるので、複数行のエラーに備えて指定する。
 	lineSpacing := face.Size * 1.2
@@ -390,15 +491,26 @@ func init() {
 }
 
 func main() {
+	opts, err := parseFlags(os.Args[1:])
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		os.Exit(2) // FlagSet が使い方を出力済み
+	}
+
+	// -version はウィンドウを開かずに終わる（ディスプレイの無い環境でも動くように、ウィンドウ設定より前で返す）
+	if opts.version {
+		fmt.Println(versionString())
+
+		return
+	}
+
 	ebiten.SetWindowSize(screenWidth, screenHeight)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-	ebiten.SetWindowTitle("KageLife")
+	ebiten.SetWindowTitle(appName)
 
-	shaderDirFlag := flag.String("shaders", "shaders", "シェーダー（*.kage）を置くディレクトリ")
-	controlAddr := flag.String("control-addr", "127.0.0.1:0", "制御口の待受アドレス（ループバックのみ。ポート 0 は空きポート）")
-	flag.Parse()
-
-	if err := run(*shaderDirFlag, *controlAddr); err != nil {
+	if err := run(opts.shaderDir, opts.controlAddr); err != nil {
 		log.Fatal(err)
 	}
 }
