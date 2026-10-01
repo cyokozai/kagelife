@@ -1,9 +1,17 @@
 # PRD: KageLife
 
-**バージョン**: 0.1
+**バージョン**: 0.2
 **作成日**: 2026-04-18
-**ステータス**: Approved
+**更新日**: 2026-09-30
+**ステータス**: v0.1 部分は Approved / v0.2 追加分（MCP）は Draft
 **オーナー**: cyokozai
+
+### 変更履歴
+
+| 版 | 日付 | 内容 |
+|----|------|------|
+| 0.1 | 2026-04-18 | 初版 |
+| 0.2 | 2026-09-30 | MCP 連携（LLM 共演 VJ）の章を追加。依存表・スコープ・未解決事項を更新。本番 VJ 中の障害対応を付録に追加。前提は [assumptions-20260930.md](assumptions-20260930.md)。MCP サーバは別リポジトリ `cyokozai/kagelife-mcp` に置く（同日決定） |
 
 ---
 
@@ -21,6 +29,12 @@ Go/Ebitengineエコシステム内で完結するVJライブコーディング�
 KodeLife（GLSL専用）やHydra（Node.js依存）の代替として、
 Goネイティブで動作する軽量ツールの需要がある。
 
+**v0.2 の追加:**
+LLM（Claude Desktop / Claude Code）を VJ の共演者にする MCP サーバを足す。
+LLM はシェーダを書き換え、コンパイルエラーの行と列を読んで直し、BPM とクロスフェードを操作し、
+画面を見て次の手を決める。GUI は常駐させ、別リポジトリ `cyokozai/kagelife-mcp` の別バイナリ `kagelife-mcp` が stdio を受けて
+localhost の制御口へ中継するので、MCP クライアントが落ちても映像は止まらない（§11）。
+
 ---
 
 ## 2. 目標と成功指標
@@ -33,6 +47,8 @@ Goネイティブで動作する軽量ツールの需要がある。
 | 安定性 | コンパイルエラーでもクラッシュしない | エラー時に前のシェーダーを維持 |
 | 起動速度 | 起動〜最初の描画 | < 2秒 |
 | クロスプラットフォーム | 対応OS | macOS (arm64/amd64) + Linux (amd64/arm64) |
+| MCP 応答性（v0.2） | ツール呼び出し〜画面反映（LLM の生成時間を除く） | < 200ms |
+| MCP 分離（v0.2） | MCP 側の障害で描画が止まらない | MCP クライアント終了・中継の異常時も 60fps を維持 |
 
 ---
 
@@ -47,6 +63,17 @@ Goネイティブで動作する軽量ツールの需要がある。
 - [ ] 起動時にシェーダー一覧をターミナル表示
 - [ ] `*ebiten.Shader`の明示的`Dispose()`によるメモリ管理
 
+### In Scope（MCP MVP、v0.2 追加）
+
+| 項目 | 内容 | リポジトリ: ブランチ | 段階 |
+|------|------|---------|------|
+| 制御口 v1 | 127.0.0.1 限定 HTTP/JSON、トークン認証、発見ファイル、Update キュー（ADR-006） | kagelife: feat/mcp-control-api | 1 |
+| MCP 中継 | 別バイナリ `kagelife-mcp`（stdio、純 Go）と 8 ツール（FR-110〜FR-117） | kagelife-mcp: feat/mcp-stdio-server | 1 |
+| 画面の確認 | capture_frame（FR-120） | kagelife: feat/mcp-capture-frame ＋ kagelife-mcp 側のツール追加 | 2 |
+| ユーザー定義 uniform | set_uniform（FR-130、Q-001 の決着） | kagelife: feat/mcp-uniform-params ＋ kagelife-mcp 側のツール追加 | 2 |
+
+段階 1 の 2 本（別リポジトリ）は並行して作り、control-api を先にマージする。段階 2 は段階 1 のマージ後に作る。
+
 ### Out of Scope（明示的に除外）
 
 - シェーダー重ね合わせ（V2: DrawRectShader複数パス設計が必要）
@@ -54,6 +81,11 @@ Goネイティブで動作する軽量ツールの需要がある。
 - Ableton Link / MIDI連携（V2: Go実装が少ない）
 - WASM対応（V2: ホットリロードと根本的に相性が悪い）
 - 頂点シェーダー（Kageの仕様上フラグメントシェーダのみ）
+- （v0.2）差分でのシェーダ編集。write_shader は丸ごと置き換え
+- （v0.2）重いシェーダの自動ロールバック。MVP は get_state の fps で知らせるだけ
+- （v0.2）シェーダの削除・リネーム
+- （v0.2）ループバック以外からの制御、MCP の Streamable HTTP トランスポート
+- （v0.2）LLM 利用料の扱い（利用者の Claude 契約で賄う）
 
 ### 将来フェーズ（V2+）
 
@@ -72,6 +104,10 @@ Goネイティブで動作する軽量ツールの需要がある。
 **VJ兼Goエンジニア（作者自身）**: Goを書けるVJアーティスト。
 KageシェーダーをライブコーディングしながらVJパフォーマンスをしたい。
 
+**LLM を共演者とする演者（v0.2 追加）**: 作者本人が、Claude Desktop または Claude Code に指示を出しながら演じる。
+LLM はシェーダを書き、エラーを読んで直し、BPM とフェードを操作する。演者は必要ならキーボードで割り込む。
+LLM は利用者ではなく、MCP のツールを呼ぶ共演者として扱う。観客は画面を見るだけ。
+
 ### ストーリーマップ
 
 | Epic | ユーザーストーリー | 受け入れ条件 | 優先度 |
@@ -81,6 +117,13 @@ KageシェーダーをライブコーディングしながらVJパフォーマ�
 | Uniform自動注入 | Timeを書くだけでアニメーションしてほしい | `Time`・`Resolution`が毎フレーム自動で注入される | Must |
 | シェーダー切り替え | キーボードでシェーダーをすぐ切り替えたい | 1〜9キーで対応するシェーダーに即時切り替え | Must |
 | メモリ管理 | 長時間使ってもメモリが増え続けないでほしい | 再ロード時に旧Shaderをパきっと Dispose() する | Should |
+| LLM 共演（v0.2） | LLM に頼んだシェーダがすぐ画面に出てほしい | write_shader → 反映 200ms 未満（生成時間を除く）。成功分は `shaders/` に残る | Must |
+| LLM 共演（v0.2） | LLM がエラーを出しても映像が止まらず、LLM が自分で直してほしい | 前のシェーダを維持。行・列付きの diagnostics（範囲内・最大 10 件）が LLM に返る | Must |
+| LLM 共演（v0.2） | LLM に状態を読ませ、拍に合わせてフェードさせたい | get_state / set_bpm / crossfade が使える | Must |
+| LLM 共演（v0.2） | クライアントが落ちても映像は流れ続けてほしい | GUI は別プロセスで常駐。中継の失敗は isError で返り描画に影響しない | Must |
+| LLM 共演（v0.2） | LLM に画面を見せて次の手を考えさせたい | capture_frame が縮小画像を返す | Must（段階 2） |
+
+詳細は [discovery-interview-mcp.md](discovery-interview-mcp.md)。
 
 ---
 
@@ -115,6 +158,8 @@ KageシェーダーをライブコーディングしながらVJパフォーマ�
 - FR-021: 起動時とシェーダー追加時にターミナルへシェーダー一覧を出力
 - FR-022: 存在しないインデックスを押しても何も起きない（エラーにしない）
 
+MCP 連携の機能要件（FR-100 番台）は §11.3 に置く。
+
 ---
 
 ## 6. 非機能要件
@@ -127,6 +172,8 @@ KageシェーダーをライブコーディングしながらVJパフォーマ�
 | 起動 | 起動〜最初の描画 < 2秒 | 手動計測 |
 | クロスプラットフォーム | macOS arm64/amd64 + Linux amd64/arm64 | GitHub Actionsでクロスコンパイル確認 |
 
+MCP 連携の非機能要件は §11.4 に置く。
+
 ---
 
 ## 7. 外部依存
@@ -135,6 +182,15 @@ KageシェーダーをライブコーディングしながらVJパフォーマ�
 |----------|------|-------------|
 | `github.com/hajimehoshi/ebiten/v2` | ゲームループ・シェーダーAPI | 最新stable |
 | `github.com/fsnotify/fsnotify` | ファイル監視 | 最新stable |
+| `golang.org/x/image` | HUD のフォント（既存。v0.1 の表に記載漏れ） | 最新stable |
+
+v0.2 でも kagelife 本体の依存は変えない（`golang.org/x/image` は記載漏れの訂正）。これ以上の直接依存を足すときは ADR を起こす。
+
+MCP サーバ（別リポジトリ `cyokozai/kagelife-mcp`）の依存は次のとおり（ADR-007）。kagelife 本体には入らない。
+
+| ライブラリ | 役割 | バージョン方針 |
+|----------|------|-------------|
+| `github.com/modelcontextprotocol/go-sdk` | MCP の stdio サーバ | v1.8.0 から。要求 Go 1.25 以上。間接依存が増える（ADR-007） |
 
 ---
 
@@ -145,6 +201,12 @@ KageシェーダーをライブコーディングしながらVJパフォーマ�
 | `ebiten.NewShader()`の繰り返し呼び出しでメモリリーク | High | Mid | Day 1のPoCで確認。Dispose()を必ず実装 |
 | ホットリロードレイテンシが200msを超える | Mid | Low | fsnotifyのデバウンス調整で対処 |
 | fsnotifyのmacOSイベントが重複発火 | Mid | High | デバウンス処理（100ms）を実装 |
+| （v0.2）LLM が書いた重いシェーダで fps が落ちる | High | Mid | get_state で fps を知らせる。演者は 1〜9 キーで既知のシェーダへ戻す（付録 B）。自動ロールバックは後回し |
+| （v0.2）MCP クライアントの終了で映像が落ちる | High | Mid | 常駐 GUI ＋ 中継の構成（ADR-005） |
+| （v0.2）制御口への不正な要求 | Mid | Low | 127.0.0.1 限定、起動時トークン、名前の正規表現、64KiB 上限（ADR-006） |
+| （v0.2）macOS 実機で ReadPixels が遅い、最小化時に Update が止まる | Mid | 不明 | 未確認。capture_frame は呼ばれたときだけ取得。ループが 2 秒応答しなければ `loop_timeout` |
+| （v0.2）構文エラーの件数が膨らみ LLM の文脈を浪費する | Low | High | diagnostics をソースの行数以内・最大 10 件に絞る |
+| （v0.2）kagelife と kagelife-mcp の間で制御口の契約がずれる | Mid | Mid | 契約の正典を ADR-006 に 1 か所だけ置く。発見ファイルの `version`（1 固定）で食い違いを検出し、1 以外は接続しない |
 
 ---
 
@@ -159,14 +221,130 @@ KageシェーダーをライブコーディングしながらVJパフォーマ�
 | Day 6 | テスト・リファクタリング | 2026-04-24 |
 | Day 7 | README + GitHub Release v1.0 | 2026-04-25 |
 
+### v0.2 ブランチ計画（MCP）
+
+すべて dev から切って dev へ出す。統合ブランチは挟まない。リポジトリは kagelife と kagelife-mcp（public、main ← dev ← feat）の 2 つ。
+
+```mermaid
+flowchart LR
+    subgraph KL["kagelife"]
+        FIX["fix/kaleidoscope-atan2"]
+        DOC["docs/mcp-requirements\n（本 PRD v0.2・ADR-005〜007）"]
+        CTL["feat/mcp-control-api"]
+        CAP["feat/mcp-capture-frame"]
+        UNI["feat/mcp-uniform-params"]
+    end
+    subgraph KM["kagelife-mcp"]
+        STD["feat/mcp-stdio-server\n（dev 向け）"]
+    end
+    DOC --> CTL
+    DOC --> STD
+    CTL -->|"先にマージ"| STD
+    CTL --> CAP
+    STD --> CAP
+    CTL --> UNI
+    STD --> UNI
+```
+
+| リポジトリ | ブランチ | 内容 | 順序 |
+|-----------|---------|------|------|
+| kagelife | fix/kaleidoscope-atan2 | `shaders/06_kaleidoscope.kage` の `atan` を `atan2` に直す | 独立 |
+| kagelife | docs/mcp-requirements | 本 PRD v0.2、ADR-005〜007、ヒアリング記録、前提合意書 | 最初 |
+| kagelife | feat/mcp-control-api | 制御口 v1（ADR-006） | 段階 1。先にマージ |
+| kagelife-mcp | feat/mcp-stdio-server | `kagelife-mcp` と 8 ツール | 段階 1。control-api と並行、後にマージ |
+| kagelife（＋ kagelife-mcp） | feat/mcp-capture-frame | 制御口の `/v1/capture` と capture_frame ツール | 段階 2 |
+| kagelife（＋ kagelife-mcp） | feat/mcp-uniform-params | 制御口の `/v1/uniforms`・uniform の抽出と set_uniform ツール | 段階 2 |
+
 ---
 
 ## 10. 未解決事項
 
 | ID | 内容 | 期限 |
 |----|------|------|
-| Q-001 | カスタムUniformの定義方法（`.kage`コメント解析 vs 別ファイル） | Day 4までに決定 |
-| Q-002 | fsnotifyのデバウンス時間の最適値（候補: 50ms / 100ms） | Day 2のPoC後に決定 |
+| Q-001 | カスタムUniformの定義方法（`.kage`コメント解析 vs 別ファイル） | **決着予定**: シェーダ内の大文字で始まるグローバル宣言を `go/parser` で抽出する方式（PoC で 9 本すべてから名前と型を抽出できた）。別ファイル方式は採らない。feat/mcp-uniform-params で確定 |
+| Q-002 | fsnotifyのデバウンス時間の最適値（候補: 50ms / 100ms） | **決着**: 100ms（現行実装・README） |
+| Q-003 | macOS（Metal）実機での ReadPixels の速さ、ウィンドウ最小化時の `Update()` の挙動 | feat/mcp-capture-frame の前に実機で確認 |
+| Q-004 | Claude Desktop への接続と、stdio サーバが返す画像の上限（未確認） | feat/mcp-capture-frame で確認 |
+| Q-005 | set_uniform で受け付ける型の範囲と、値の検査（予約 uniform は対象外） | feat/mcp-uniform-params |
+| Q-006 | dev から main へ上げるときの衝突の有無（main にしか無いコミットが 6 本） | 次の dev → main 昇格の前 |
+| Q-007 | 既存の問題: `internal/filewatcher` の `TestDebounce_SingleEvent` が `-race` でデータ競合する（MCP の範囲外で見つかった） | 別 PR で修正 |
+
+---
+
+## 11. MCP 連携（v0.2 追加）
+
+### 11.1 目的
+
+LLM を VJ の共演者にする。LLM がシェーダを書き換え、結果（成否・エラーの位置・状態・画面）を受け取って次の手を決められるようにする。
+現状、外部から状態を変える手段はファイル変更だけで、結果を返す経路が無い。これを、描画を止めずに足す。
+
+前提は [assumptions-20260930.md](assumptions-20260930.md)、構成は ADR-005（MCP サーバは別リポジトリ `cyokozai/kagelife-mcp`）、制御口は ADR-006、SDK は ADR-007。
+
+### 11.2 ユースケース
+
+| # | ユースケース | 主なツール |
+|---|------------|-----------|
+| UC-1 | 演者の指示で LLM が新しいシェーダを書き、画面に出す | get_kage_guide → write_shader → switch_shader |
+| UC-2 | LLM がコンパイルエラーの行と列を読んで直す | write_shader（失敗）→ write_shader（修正版） |
+| UC-3 | LLM が BPM を設定し、拍に合わせてクロスフェードする | get_state → set_bpm → crossfade |
+| UC-4 | LLM が既存のシェーダを読み、手を加えて書き戻す | list_shaders → read_shader → write_shader |
+| UC-5 | LLM が画面を見て、見た目を踏まえて次の手を決める | capture_frame（段階 2） |
+| UC-6 | LLM がシェーダのパラメータを動かす | set_uniform（段階 2） |
+
+### 11.3 機能要件
+
+#### 構成・起動
+
+- FR-100: `kagelife` は起動時に 127.0.0.1 限定の制御口を開く（`-control-addr`、既定 `127.0.0.1:0`）。ループバック以外を指定したら起動エラー（判定は IP リテラルの 127.0.0.0/8 と ::1 だけ。`localhost`・`0.0.0.0` も起動エラー）
+- FR-101: `kagelife` は起動時に発見ファイル（addr / token / pid / shader_dir / version）を 0600 で書き、正常終了時に消す（中の token が自分のものと一致するときだけ）。`version` は 1 固定。場所は `KAGELIFE_CONTROL_FILE`、無ければ `os.UserCacheDir()/kagelife/control.json`
+- FR-102: `kagelife-mcp` は別リポジトリ `cyokozai/kagelife-mcp` の別バイナリで、MCP クライアントが起動する stdio の MCP サーバとして動く。cgo も ebiten も使わない純 Go とする。stdout は JSON-RPC 専用、ログは stderr。kagelife 本体に `mcp` サブコマンドは作らない
+- FR-103: `kagelife-mcp` はツール呼び出しのたびに発見ファイルを読み、Bearer トークン付きで制御口へ中継する
+- FR-104: 制御口に届かない（発見ファイルが無い・接続拒否・タイムアウト・2xx 以外）ときは、ツールの結果を `isError` 付きで返す。`error` と `message`（`compile_error` なら `diagnostics`）を LLM が読める形にする
+- FR-105: stdin が EOF になったら `kagelife-mcp` は正常終了する
+- FR-106: 制御口の要求は返信チャネル付きのコマンドとして `Update()` が処理する。`Update()` は毎 tick キューを読み切る。ループが 2 秒以内に応答しなければ 503 `loop_timeout`
+- FR-107: シェーダは index ではなく名前（ファイル名から `.kage` を除いたもの）で指定する。名前は `^[a-z0-9][a-z0-9_-]{0,63}$`。GET・PUT・switch・crossfade のすべてで検査し、エスケープはデコードしてから検査する
+- FR-108: `kagelife-mcp` は発見ファイルの `version` が 1 以外なら接続せず、版の食い違いを `isError` で返す
+- FR-109: 制御口の細かな振る舞い（`invalid_request`・`internal_error`、crossfade の判定順、`created` と `last_error` の扱い、本文の上限 1MiB など）は ADR-006 の補足 1〜15 に従う
+
+#### MCP ツール（段階 1: 8 種）
+
+- FR-110: `list_shaders` — シェーダ名の一覧とアクティブなシェーダを返す（GET /v1/state）
+- FR-111: `read_shader` — 指定したシェーダのソースを返す（GET /v1/shaders/{name}）
+- FR-112: `write_shader` — ソースを丸ごと置き換える（PUT /v1/shaders/{name}）。検査の順は、名前 → 64KiB 上限 → `//kage:unit pixels` 必須 → コンパイル。コンパイルに成功したときだけ、一時ファイル＋rename で `shaders/<名前>.kage` に保存して差し替える（無ければ末尾に追加）。成功してもアクティブにはしない（0 本の状態で書いた 1 本だけは表示される）。失敗したらファイルに触れず、ソースの行数以内・最大 10 件の diagnostics（行・列・メッセージ）を返す
+- FR-113: `switch_shader` — 指定したシェーダに即時に切り替える（POST /v1/switch）
+- FR-114: `crossfade` — 指定したシェーダへ拍数でクロスフェードする（POST /v1/crossfade）。beats は 0 < beats <= 64、省略時は現在の拍数。BPM 未設定なら `bpm_not_set`
+- FR-115: `set_bpm` — BPM を 20〜300 で設定する（POST /v1/bpm）。以後のタップテンポで上書きされてよい
+- FR-116: `get_state` — アクティブなシェーダ・一覧・BPM・フェード状態・fps・解像度・直近のエラー（ファイル監視経由の失敗も含む）を返す（GET /v1/state）
+- FR-117: `get_kage_guide` — Kage の言語の制約（使える型、使えない構文、画像入力は最大 4 枚、`//kage:unit pixels` 必須）と予約 uniform（Time / Resolution / Beat / Cursor / Frame / Random）を返す。GUI 無しでも答える
+
+#### MCP ツール（段階 2: 後続 PR）
+
+- FR-120: `capture_frame` — 現在のフレームを縮小した画像を ImageContent で返す。長辺の既定は 1024px、形式は png または jpeg。各辺 2000px 以下。呼ばれたときだけ取得する（feat/mcp-capture-frame。制御口は `GET /v1/capture` を追加）
+- FR-121: capture_frame の ReadPixels と縮小は `Update` / `Draw` の中で行い、画像の符号化はゲームループの外で行う
+- FR-130: `set_uniform` — シェーダ内の大文字で始まるグローバル宣言（予約 uniform を除く）を `go/parser` で抽出し、その値を設定する。get_state に uniform の一覧を載せる（feat/mcp-uniform-params。制御口は `POST /v1/uniforms` を追加）
+- FR-131: set_uniform のパラメータ層は、V2 で予定している TUI のパラメータ調整と共有する
+
+### 11.4 非機能要件
+
+| カテゴリ | 要件 | 測定方法 |
+|---------|------|---------|
+| フレームレート | MCP の呼び出し中も 60fps を維持 | get_state の fps。macOS 実機で手動確認 |
+| 反映の速さ | ツール呼び出し → 画面反映 < 200ms（LLM の生成時間を除く） | 制御口の往復を計測。PoC（Xvfb）では差し替え 17ms。macOS 実機は未計測 |
+| 画面取得（段階 2） | capture_frame の往復 < 200ms | PoC（Xvfb）では 19〜22ms（ReadPixels 1.6〜3.2ms、PNG 符号化 4〜5.5ms、オフスクリーン縮小なら約 1ms）。macOS 実機は未計測 |
+| エラー耐性 | コンパイル失敗時は前のシェーダを維持し、ファイルも変えない | ユニットテスト（モックのコンパイラ） |
+| 障害の分離 | MCP クライアントの終了・中継の異常・制御口のエラーで描画を止めない | 構成（ADR-005）と統合テスト |
+| 応答の上限 | ループが 2 秒以内に応答しなければ `loop_timeout` | ユニットテスト |
+| 安全性 | 127.0.0.1 限定、起動時トークン（32 バイト乱数）、発見ファイル 0600、名前の正規表現で `shaders/` 直下に限定、64KiB 上限 | ユニットテスト |
+| 重いシェーダ | MVP では get_state の fps で知らせるだけ。自動で戻さない | — |
+| 画像の大きさ | 各辺 2000px 以下。画像トークンは約 ⌈幅/28⌉×⌈高さ/28⌉（長辺 1280 で約 1200） | — |
+| テスト | kagelife の `internal/control` は ebiten に依存させず、CGO 無しで CI を回す。kagelife-mcp は純 Go で、偽の制御口に対してテストする。両者を結合した E2E はリポジトリをまたぐので、macOS 実機で手動確認する。ウィンドウを伴うテストは CI に入れない（Alpine で SIGSEGV） | CI |
+
+### 11.5 制約
+
+- GUI は macOS ホストでネイティブに動かす。コンテナはビルドとテストだけ
+- Claude Code は stdio サーバを自動で再接続しない
+- Claude Desktop は画像対応と書かれているが、stdio サーバでの画像の上限は未確認
+- Ebitengine v2.10.4 は `//kage:unit` 指定なし（texels）で行番号が 4 行ずれる
 
 ---
 
@@ -178,3 +356,23 @@ KageシェーダーをライブコーディングしながらVJパフォーマ�
 | Uniform | シェーダーへCPUから渡す定数。毎フレーム更新可能 |
 | ホットリロード | ファイル保存時にコンパイル・画面反映を自動で行う仕組み |
 | Dispose | `*ebiten.Shader`のGPUリソースを解放するメソッド |
+| MCP | Model Context Protocol。LLM クライアントが外部のツールを呼ぶための手順 |
+| 制御口 | 常駐 GUI が 127.0.0.1 で開く HTTP/JSON の口（ADR-006） |
+| 中継 | `kagelife-mcp`。別リポジトリ `cyokozai/kagelife-mcp` の別バイナリで、stdio の MCP を受けて制御口へ渡す（ADR-005） |
+| 発見ファイル | 制御口のアドレスとトークンを書いたファイル（`control.json`） |
+| diagnostics | コンパイルエラーの行・列・メッセージの一覧 |
+
+---
+
+## Appendix B: 本番 VJ 中の障害対応
+
+Runbook は作らない（assumptions-20260930 #14）。本番中に起こりうることと、その場の手当てだけを書く。
+
+| 症状 | まず見る | 手当て |
+|------|---------|--------|
+| LLM の書いたシェーダで映像が重い・カクつく | get_state の fps | キーボード `1`〜`9` で既知のシェーダに戻す。LLM には軽くするよう指示する |
+| LLM がコンパイルエラーを繰り返す | HUD（`H`）、get_state の last_error | 映像は前のシェーダのまま続く。そのまま LLM に直させるか、手で切り替える |
+| MCP クライアントが落ちた・再起動した | 映像は続いているか | 映像は止まらない。クライアントを立ち上げ直し、MCP サーバに手動で再接続する（Claude Code は自動で再接続しない） |
+| ツールが「GUI に接続できない」と返す | `kagelife` が動いているか | `kagelife` をリポジトリのルートで起動し直す。`kagelife-mcp` は呼び出しのたびに発見ファイルを読むので、クライアントの再接続は要らない |
+| ツールが `loop_timeout` を返す | ウィンドウが最小化・背面になっていないか | ウィンドウを前面に戻す（macOS での最小化時の挙動は未確認） |
+| `kagelife` 自体が落ちた | ターミナルのログ | 起動し直す。成功したシェーダは `shaders/` に保存済みなので作品は残る |
