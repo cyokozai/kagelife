@@ -319,7 +319,7 @@ type Diagnostic struct {
 
 | 対象 | リポジトリ | テスト | CI |
 |------|-----------|-------|----|
-| `internal/control` | kagelife | 認証・名前検査・本文とソースの上限・`unit_pixels_required`・diagnostics 整形・`loop_timeout`・ADR-006 補足 1〜15（httptest、モックのコンパイラ、偽の Update） | 入れる |
+| `internal/control` | kagelife | 認証・名前検査・本文とソースの上限・`unit_pixels_required`・diagnostics 整形・`loop_timeout`・ADR-006 補足 1〜18（httptest、モックのコンパイラ、偽の Update） | 入れる |
 | diagnostics の実データ | kagelife | `ebiten.NewShader` の実エラーからの整形 | NewShader はウィンドウ無しで動くので入れられる |
 | MCP サーバ | kagelife-mcp | ツールのスキーマ・中継・`isError` の形・`version` 検査・stdin EOF 終了（偽の制御口） | 入れる（`-race`、純 Go） |
 | GUI とキューの結合 | kagelife | 往復時間・差し替え | 入れない（ウィンドウが要る。Alpine で SIGSEGV）。macOS 実機で手動 |

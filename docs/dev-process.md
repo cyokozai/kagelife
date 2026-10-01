@@ -1,7 +1,7 @@
 # 開発プロセス設計書: KageLife
 
 **作成日**: 2026-04-18
-**更新日**: 2026-09-30（実装・CI との整合）
+**更新日**: 2026-10-02（W2-1 の `internal/uniform`・`-version`・ウィンドウタイトル・HUD の `(default)`・削除の配線、#24 の `internal/control` を反映）
 
 ---
 
@@ -27,7 +27,8 @@ Refactor → コードをきれいにする（テストは常にグリーン）
 | `ShaderManager`（`internal/shadermgr`） | ユニット | Dispose呼び出し、エラー時フォールバック、インデックス境界（コンパイル関数をモックに差し替える） |
 | `FileWatcher`（`internal/filewatcher`） | ユニット | デバウンス処理（短いデバウンス間隔でテスト用に生成）、`Close()` の冪等性 |
 | `Tapper`（`internal/tempo`） | ユニット | BPM の算出、スライド窓、タイムアウト、拍の位相 |
-| `UniformBuilder` | ユニット | Time/Resolution値の正確性（独立した `UniformBuilder` は作らず、Uniform は `main.go` の `Game.Draw()` で組み立てるため、ユニットテストは無い） |
+| `UniformBuilder`（`internal/uniform`） | ユニット | 予約 Uniform（Time・Resolution・Beat・Cursor・Frame・Random）の値の正確性、map とスライスの使い回し（`internal/uniform` のテスト。W2-1 で追加） |
+| 制御口（`internal/control`） | ユニット | 認証・名前検査・上限・diagnostics 整形・`loop_timeout`・[ADR-006](adr/ADR-006-control-api.md) の補足 1〜18（httptest、モックのコンパイラ。#24 で追加） |
 | クロスフェード（`internal/shadermgr`） | ユニット | フェード中の再指示、積算による進行（`TickAt`）、スロットのファイル名順固定と `Remove`（[ADR-008](adr/ADR-008-crossfade-compositing.md)） |
 | ホットリロード全体 | 統合 | ファイル書き換え → Reload呼び出しの連鎖、保存〜反映の時間（W1-2 で追加、最悪 103.1 ms（Linux）） |
 
@@ -49,15 +50,16 @@ Refactor → コードをきれいにする（テストは常にグリーン）
 ### Day 2-3 — Core実装
 - [x] `FileWatcher`: fsnotify + デバウンス(100ms) + channel（`internal/filewatcher`。channel は `chan string`、[ADR-002](adr/ADR-002-hotreload-mechanism.md) の注記を参照）
 - [x] `ShaderManager`: ロード・切替・Dispose（`internal/shadermgr`）
-- [x] `UniformBuilder`: Time/Resolution自動注入（独立した型は作らず `Game.Draw()` で組み立て）
+- [x] `UniformBuilder`: Time/Resolution自動注入（当初は `Game.Draw()` で組み立て、W2-1 で `internal/uniform` の `Builder` に分けた）
 - [x] `Game.Update()`: channel受信 + Reload呼び出し
 - [x] `Game.Draw()`: DrawRectShader呼び出し
 
 ### Day 4 — 品質・UX
 - [x] エラーログのフォーマット整備（ファイル名・行番号付き）（`path:行:列: msg` の形式。エラーはファイルごとに保持）
 - [x] 起動時シェーダー一覧のターミナル表示（1 始まりの番号。シェーダー追加時にも一覧を出力）
-- [ ] ウィンドウタイトルに現在シェーダー名を表示（第 2 波）
-- [x] ユニットテストを揃える（`internal/` の 3 パッケージ。`main.go` は対象外）
+- [x] ウィンドウタイトルに現在シェーダー名を表示（W2-1）
+- [x] ユニットテストを揃える（`internal/` の各パッケージ。`main.go` は対象外）
+- [x] `-version` フラグ（`kagelife <version>` を出して終了。Makefile の `-X main.version` で埋め込む。W2-1）
 
 ### Day 5 — Could（時間があれば）
 - [x] タップBPM（スペースキー → Uniformに流す）（`internal/tempo`、`Beat` Uniform。[ADR-008](adr/ADR-008-crossfade-compositing.md) の D3 を含む）
@@ -68,8 +70,8 @@ Refactor → コードをきれいにする（テストは常にグリーン）
 - [x] `Cursor` / `Frame` / `Random` Uniform
 - [x] HUD（H）・フルスクリーン（F）・リサイズと DPI 対応（`LayoutF`）
 - [x] [ADR-008](adr/ADR-008-crossfade-compositing.md) の D1〜D3 と積算による進み具合
-- [ ] `Remove`（ファイル削除時のスロット除去）の `main.go` への配線（第 2 波）
-- [ ] `Measured()` の HUD 表示（第 2 波）
+- [x] `Remove`（ファイル削除時のスロット除去）の `main.go` への配線（filewatcher の `Removed` → `Engine.RemoveFile`。W2-1）
+- [x] `Measured()` の HUD 表示（既定値の BPM に `(default)` を付ける。W2-1）
 
 ### Day 6 — テスト・リファクタリング
 - [x] `go test ./...`がグリーンになること
