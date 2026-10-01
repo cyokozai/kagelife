@@ -1,6 +1,7 @@
 # 開発プロセス設計書: KageLife
 
 **作成日**: 2026-04-18
+**更新日**: 2026-09-30（実装・CI との整合）
 
 ---
 
@@ -23,10 +24,12 @@ Refactor → コードをきれいにする（テストは常にグリーン）
 
 | コンポーネント | テスト種別 | 観点 |
 |-------------|---------|------|
-| `ShaderManager` | ユニット | Dispose呼び出し、エラー時フォールバック、インデックス境界 |
-| `FileWatcher` | ユニット | デバウンス処理（タイマーモック） |
-| `UniformBuilder` | ユニット | Time/Resolution値の正確性 |
-| ホットリロード全体 | 統合 | ファイル書き換え → Reload呼び出しの連鎖 |
+| `ShaderManager`（`internal/shadermgr`） | ユニット | Dispose呼び出し、エラー時フォールバック、インデックス境界（コンパイル関数をモックに差し替える） |
+| `FileWatcher`（`internal/filewatcher`） | ユニット | デバウンス処理（短いデバウンス間隔でテスト用に生成）、`Close()` の冪等性 |
+| `Tapper`（`internal/tempo`） | ユニット | BPM の算出、スライド窓、タイムアウト、拍の位相 |
+| `UniformBuilder` | ユニット | Time/Resolution値の正確性（独立した `UniformBuilder` は作らず、Uniform は `main.go` の `Game.Draw()` で組み立てるため、ユニットテストは無い） |
+| クロスフェード（`internal/shadermgr`） | ユニット | フェード中の再指示、積算による進行（`TickAt`）、スロットのファイル名順固定と `Remove`（[ADR-008](adr/ADR-008-crossfade-compositing.md)） |
+| ホットリロード全体 | 統合 | ファイル書き換え → Reload呼び出しの連鎖、保存〜反映の時間（W1-2 で追加、最悪 103.1 ms（Linux）） |
 
 ### テスト対象外（目視確認）
 
@@ -38,49 +41,64 @@ Refactor → コードをきれいにする（テストは常にグリーン）
 ## 1週間タスクリスト
 
 ### Day 1 — PoC（技術リスクの排除）
-- [ ] `ebiten.NewShader()`を同一プロセスで複数回呼び出せることを確認
-- [ ] `(*ebiten.Shader).Dispose()`の動作を確認
-- [ ] コンパイルエラーを`error`として受け取れることを確認
-- [ ] `Time`/`Resolution`をUniformとして渡す最小実装
+- [x] `ebiten.NewShader()`を同一プロセスで複数回呼び出せることを確認（再ロードのたびに呼ぶ形で実装）
+- [x] `(*ebiten.Shader).Dispose()`の動作を確認（再ロード時に旧シェーダーを解放）
+- [x] コンパイルエラーを`error`として受け取れることを確認
+- [x] `Time`/`Resolution`をUniformとして渡す最小実装
 
 ### Day 2-3 — Core実装
-- [ ] `FileWatcher`: fsnotify + デバウンス(100ms) + channel
-- [ ] `ShaderManager`: ロード・切替・Dispose
-- [ ] `UniformBuilder`: Time/Resolution自動注入
-- [ ] `Game.Update()`: channel受信 + Reload呼び出し
-- [ ] `Game.Draw()`: DrawRectShader呼び出し
+- [x] `FileWatcher`: fsnotify + デバウンス(100ms) + channel（`internal/filewatcher`。channel は `chan string`、[ADR-002](adr/ADR-002-hotreload-mechanism.md) の注記を参照）
+- [x] `ShaderManager`: ロード・切替・Dispose（`internal/shadermgr`）
+- [x] `UniformBuilder`: Time/Resolution自動注入（独立した型は作らず `Game.Draw()` で組み立て）
+- [x] `Game.Update()`: channel受信 + Reload呼び出し
+- [x] `Game.Draw()`: DrawRectShader呼び出し
 
 ### Day 4 — 品質・UX
-- [ ] エラーログのフォーマット整備（ファイル名・行番号付き）
-- [ ] 起動時シェーダー一覧のターミナル表示
-- [ ] ウィンドウタイトルに現在シェーダー名を表示
-- [ ] ユニットテストを揃える
+- [x] エラーログのフォーマット整備（ファイル名・行番号付き）（`path:行:列: msg` の形式。エラーはファイルごとに保持）
+- [x] 起動時シェーダー一覧のターミナル表示（1 始まりの番号。シェーダー追加時にも一覧を出力）
+- [ ] ウィンドウタイトルに現在シェーダー名を表示（第 2 波）
+- [x] ユニットテストを揃える（`internal/` の 3 パッケージ。`main.go` は対象外）
 
 ### Day 5 — Could（時間があれば）
-- [ ] タップBPM（スペースキー → Uniformに流す）
-- [ ] Q-001の決定: カスタムUniform定義方式
+- [x] タップBPM（スペースキー → Uniformに流す）（`internal/tempo`、`Beat` Uniform。[ADR-008](adr/ADR-008-crossfade-compositing.md) の D3 を含む）
+- [x] Q-001の決定: カスタムUniform定義方式（v1.0 では扱わない。MCP 段階 2 の set_uniform（PRD FR-130、feat/mcp-uniform-params）で確定する）
+
+### v1.0 に前倒しした機能
+- [x] クロスフェード（Shift+数字、`[` `]` で拍数）（合成・再指示・進み具合は [ADR-008](adr/ADR-008-crossfade-compositing.md) に従う）
+- [x] `Cursor` / `Frame` / `Random` Uniform
+- [x] HUD（H）・フルスクリーン（F）・リサイズと DPI 対応（`LayoutF`）
+- [x] [ADR-008](adr/ADR-008-crossfade-compositing.md) の D1〜D3 と積算による進み具合
+- [ ] `Remove`（ファイル削除時のスロット除去）の `main.go` への配線（第 2 波）
+- [ ] `Measured()` の HUD 表示（第 2 波）
 
 ### Day 6 — テスト・リファクタリング
-- [ ] `go test ./...`がグリーンになること
-- [ ] `golangci-lint`がパスすること
-- [ ] README.md の初稿
+- [x] `go test ./...`がグリーンになること
+- [x] `golangci-lint`がパスすること
+- [x] README.md の初稿
+- [x] ホットリロードの統合テスト（保存〜反映の時間を含む。W1-2 で追加、最悪 103.1 ms（Linux）。macOS は未確認）
 
 ### Day 7 — リリース
-- [ ] `.github/workflows/ci.yml`
-- [ ] `.github/workflows/release.yml`
-- [ ] `.github/release.yml`（リリースノート分類）
+- [x] `.github/workflows/ci.yml`
+- [x] `.github/workflows/release.yml`（実際の Actions では未実行。cgo=1 のネイティブビルド、[ADR-003](adr/ADR-003-cross-platform.md) / [ADR-004](adr/ADR-004-cicd-release.md)）
+- [x] `.github/release.yml`（リリースノート分類）
+- [x] Makefile の package / checksum、Ebitengine のビルド依存をまとめた composite action（setup-ebiten）
+- [ ] LICENSE ファイルの追加（配布物に同梱する）
+- [ ] 性能の実測（起動〜最初の描画 < 2秒、長時間実行でのメモリ）
 - [ ] `v1.0.0`タグを打ってGitHub Releaseを確認
 
 ---
 
 ## ブランチ戦略
 
-個人開発なので GitHub Flow（シンプル版）を採用:
+個人開発なので GitHub Flow（シンプル版）に統合ブランチ `dev` を加えた形を採用:
 
 ```
 main ← 常に動く状態を保つ
-feature/xxx ← 機能単位で作成、小さいPRでマージ
+dev ← 統合ブランチ。作業ブランチの PR はここへマージする
+feat/xxx, fix/xxx, docs/xxx ← 作業単位で作成、小さいPRでマージ
 ```
+
+CI（`ci.yml`）は `main` と `dev` の両方への push / PR で動く。
 
 **コミットメッセージ規約** (Conventional Commits):
 ```
@@ -96,14 +114,19 @@ chore: go.modを更新
 
 ```mermaid
 flowchart LR
-    subgraph "ci.yml（PR/push）"
-        L["golangci-lint"] --> T["go test ./..."]
+    subgraph "ci.yml（main / dev への PR・push）"
+        F["gofmt"] --> V["go vet"] --> T["go test -race"]
+        L["golangci-lint v2"]
     end
 
-    subgraph "release.yml（v*.*.*タグ）"
-        B1["darwin/arm64"] --> R["gh release create\n--generate-notes"]
-        B2["darwin/amd64"] --> R
-        B3["linux/amd64"] --> R
-        B4["linux/arm64"] --> R
+    subgraph "release.yml（v*.*.*タグ、cgo=1）"
+        B1["darwin/arm64\nmacos-latest"] --> S["SHA256SUMS"]
+        B2["darwin/amd64\nmacos-latest（クロス）"] --> S
+        B3["linux/amd64\nubuntu-latest"] --> S
+        B4["linux/arm64\nubuntu-24.04-arm"] --> S
+        S --> R["gh release create\n--generate-notes"]
     end
 ```
+
+- 各ビルドは tar.gz（バイナリ・`shaders/`・README・LICENSE）を作る
+- `release.yml` は実際の Actions ではまだ実行しておらず、ランナーの提供状況も未確認

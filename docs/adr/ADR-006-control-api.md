@@ -1,9 +1,9 @@
 # ADR-006: 制御口 v1 の契約 — localhost HTTP/JSON ＋ Update キュー
 
 **ステータス**: Accepted
-**日付**: 2026-09-30
+**日付**: 2026-09-30（改訂: 2026-10-01。BPM の扱いを ADR-008 D3 に合わせた。PRD Q-008）
 **決定者**: cyokozai
-**関連**: ADR-002（fsnotify + buffered channel）、ADR-005（プロセス構成）、assumptions-20260930 #4 #5 #10
+**関連**: ADR-002（fsnotify + buffered channel）、ADR-005（プロセス構成）、[ADR-008](ADR-008-crossfade-compositing.md)（クロスフェードと BPM の既定値・制限）、assumptions-20260930 #4 #5 #10
 
 ---
 
@@ -65,12 +65,13 @@ kagelife の feat/mcp-control-api（GUI 側）と kagelife-mcp の feat/mcp-stdi
 #### GET /v1/state
 200:
 ```json
-{"active":"01_uv","shaders":["01_uv","02_time_sin"],"bpm":120.0,
+{"active":"01_uv","shaders":["01_uv","02_time_sin"],"bpm":120.0,"bpm_measured":false,
  "fade":{"fading":false,"target":"","mix":0.0,"beats":4.0},
  "fps":59.9,"resolution":[1280,720],
  "last_error":null}
 ```
 `last_error` は `{"shader":"x","message":"..."}` または null（ファイル監視経由のコンパイル失敗も含む最新のもの。寿命は補足 8）。`active` はシェーダ 0 本なら `""`。
+`bpm` は常に 40〜300 で、0（未設定）にはならない。タップ前は既定の 120（[ADR-008](ADR-008-crossfade-compositing.md) D3）。`bpm_measured` は、`bpm` が既定値のままなら false、タップまたは `POST /v1/bpm` で設定された値なら true（`tempo.Tapper.Measured()` に当たる）。
 
 #### GET /v1/shaders/{name}
 200 `{"name":"x","source":"..."}` / 404 `not_found`
@@ -96,12 +97,13 @@ body `{"name":"x"}` → 200 `{"active":"x"}` / 404 `not_found`
 
 #### POST /v1/crossfade
 body `{"name":"x","beats":4}`（beats 省略時は現在の FadeBeats。指定時は 0 < beats <= 64）。
-BPM が 0（未設定）なら 409 `bpm_not_set`。200 `{"target":"x","beats":4.0}` / 404 `not_found` / 400 `invalid_beats`。
-判定順は 名前 400 → beats 400 → 未読込 404 → BPM 0 で 409（補足 4）。beats 指定はプリセットを変えない（補足 5）。フェードしていない active への crossfade は何もせず 200（補足 6）
+200 `{"target":"x","beats":4.0}` / 404 `not_found` / 400 `invalid_beats`。
+BPM は常に 40〜300 で 0 にならないため、BPM を理由に失敗することはない（タップ前は既定の 120 BPM で進む。[ADR-008](ADR-008-crossfade-compositing.md) D3）。
+判定順は 名前 400 → beats 400 → 未読込 404（補足 4）。beats 指定はプリセットを変えない（補足 5）。フェードしていない active への crossfade は何もせず 200（補足 6）
 
 #### POST /v1/bpm
-body `{"bpm":128}` → 20〜300 以外は 400 `invalid_bpm`。200 `{"bpm":128.0}`。
-タップ BPM と共存する。以後のタップで上書きされてよい
+body `{"bpm":128}` → 40〜300 以外は 400 `invalid_bpm`。200 `{"bpm":128.0}`。
+範囲はタップ BPM の制限と同じ（[ADR-008](ADR-008-crossfade-compositing.md) D3）。タップ BPM と共存する。以後のタップで上書きされてよい
 
 ### v1 の範囲外（後続 PR）
 - `GET /v1/capture?max_width=1024&format=png|jpeg`（feat/mcp-capture-frame）
@@ -119,11 +121,10 @@ body `{"bpm":128}` → 20〜300 以外は 400 `invalid_bpm`。200 `{"bpm":128.0}
 | 400 | `invalid_request` | JSON 本文が不正、または必須項目が欠けている |
 | 400 | `invalid_name` | シェーダ名が正規表現に合わない（GET・PUT・switch・crossfade。エスケープはデコードしてから検査） |
 | 400 | `invalid_beats` | beats が 0 以下または 64 超 |
-| 400 | `invalid_bpm` | bpm が 20〜300 の外 |
+| 400 | `invalid_bpm` | bpm が 40〜300 の外 |
 | 401 | `unauthorized` | トークンの欠落・不一致 |
 | 404 | `not_found` | シェーダが無い、または未定義パス |
 | 405 | `method_not_allowed` | メソッド違い |
-| 409 | `bpm_not_set` | BPM 未設定でクロスフェード |
 | 413 | `too_large` | ソースが 64KiB 超、または JSON 本文全体が 1MiB 超 |
 | 422 | `unit_pixels_required` | `//kage:unit pixels` の行が無い |
 | 422 | `compile_error` | コンパイル失敗（`diagnostics` 付き） |
@@ -137,7 +138,7 @@ feat/mcp-control-api の実装で確定した補足。本節と実装が食い�
 1. **400 `invalid_request`**: JSON 本文が不正、または必須項目が欠けている
 2. **500 `internal_error`**: ファイルの読み書きに失敗した
 3. **名前検査の範囲**: 名前検査は PUT だけでなく、GET /v1/shaders/{name}、switch、crossfade の name にも適用する（400 `invalid_name`）。`..%2Fx` のようにエスケープされたものも、デコードしてから検査して 400 にする
-4. **crossfade の判定順**: 名前検査 400 → beats 400 → 未読込 404 → BPM 0 で 409
+4. **crossfade の判定順**: 名前検査 400 → beats 400 → 未読込 404（BPM は 0 にならないので BPM による失敗は無い。2026-10-01 改訂）
 5. **beats とプリセット**: beats を指定した crossfade はプリセット（`[` `]` で変える拍数）を変えない。state の `fade.beats` は、指定付きのフェード中はその値、それ以外はプリセットの値を返す
 6. **active への crossfade**: 今フェードしていない状態で active と同じシェーダへ crossfade すると何も起きない。それでも 200 を返す
 7. **`created` の基準**: ファイル基準。rename の前にファイルが無ければ true
