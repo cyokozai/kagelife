@@ -1,7 +1,7 @@
 # ADR-002: ホットリロード実装方式 — fsnotify + buffered channel
 
 **ステータス**: Accepted
-**日付**: 2026-04-18
+**日付**: 2026-04-18（注記追加: 2026-09-30）
 **決定者**: cyokozai
 
 ---
@@ -58,5 +58,13 @@ Ebitengineのゲームループは`Update()`が毎フレーム（60fps）メイ�
 - fsnotifyがmacOS上でCreate+Writeの2イベントを発火することがある → デバウンスで対処
 
 **Action Items**:
-- [ ] Day 1 PoCで`ebiten.NewShader()`の再呼び出し可否を確認
-- [ ] Day 2でfsnotifyのデバウンス値（50ms or 100ms）を計測して最適化
+- [x] Day 1 PoCで`ebiten.NewShader()`の再呼び出し可否を確認（`Manager.Reload()` が再ロードのたびにコンパイル関数を呼び、旧シェーダーを `Dispose()` する形で実装）
+- [x] Day 2でfsnotifyのデバウンス値（50ms or 100ms）を計測して最適化（決定者の判断で 100ms に確定。PRD Q-002。保存〜画面反映の時間は統合テストで測る。統合テストは W1-2 で追加、最悪 103.1 ms（Linux）。保存から `Events` を受け取るまでの 5 回の測定で、race 付き・Linux のコンテナ。macOS は未確認）
+
+## 注記（2026-09-30）: 実装との差分
+
+- **イベントの型**: 本 ADR は `chan ReloadEvent`（構造体）としていたが、実装は `chan string` で、変更のあった `.kage` ファイルのパスだけを送る（`filewatcher.Watcher.Events <-chan string`）。受け取った `Game.Update()` がファイルを読み、`shadermgr.Manager.Reload(path, src)` を呼ぶ
+- **バッファ**: 外部に公開する `Events` と、fsnotify の生イベントを受ける内部チャネルの両方が容量 8
+- **デバウンス**: 100ms。タイマーはファイルパスごとに持ち、同じファイルへのイベントだけをまとめる（別ファイルのイベントは互いに打ち消さない）
+- **パッケージ**: `FileWatcher` は `internal/filewatcher` パッケージの `Watcher` として実装した（[ADR-001](ADR-001-architecture-pattern.md) の改訂を参照）
+- **W1-2 での追加**: アトミック保存（rename）と削除に追従する（削除は新しい `Removed` チャネルで通知。`main.go` への配線は第 2 波）。`.` や `#` で始まる一時ファイルは除外する。デバウンスのデータ競合も修正した
