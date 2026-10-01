@@ -3,16 +3,21 @@ package main
 import (
 	"bytes"
 	"errors"
+	"flag"
 	"fmt"
 	"image/color"
 	"log"
 	"math/rand/v2"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 
+	"github.com/cyokozai/kagelife/internal/control"
 	"github.com/cyokozai/kagelife/internal/filewatcher"
 	"github.com/cyokozai/kagelife/internal/shadermgr"
 	"github.com/cyokozai/kagelife/internal/tempo"
@@ -27,7 +32,6 @@ import (
 const (
 	screenWidth  = 640
 	screenHeight = 480
-	shaderDir    = "shaders"
 
 	// maxEventsPerFrame は 1 フレームで処理するファイル変更イベントの上限。
 	// コンパイルは同期で走るため、溜まりすぎたときにフレームが長く止まらないようにする。
@@ -55,6 +59,10 @@ type Game struct {
 
 	// offscreen はクロスフェードの B 側を描く画面外の画像。画面サイズが変わったときだけ作り直す。
 	offscreen *ebiten.Image
+
+	eng   *control.Engine // 制御口から名前で操作する VJ 状態（sm と tapper を共有）
+	queue *control.Queue  // 制御口からの処理。Update で毎 tick 読み切る
+	quit  atomic.Bool     // シグナル受信で立て、次の Update で終了する
 }
 
 var hudFaceSource *text.GoTextFaceSource
@@ -63,7 +71,8 @@ func ebitenCompiler(src []byte) (shadermgr.Shader, error) {
 	return ebiten.NewShader(src)
 }
 
-func NewGame() (*Game, error) {
+// NewGame は shaderDir（絶対パス）のシェーダーを読み込んだ Game を作る。
+func NewGame(shaderDir string, queue *control.Queue) (*Game, error) {
 	g := &Game{
 		sm:         shadermgr.New(ebitenCompiler),
 		tapper:     tempo.New(2*time.Second, 8),
@@ -73,10 +82,17 @@ func NewGame() (*Game, error) {
 		errs:       map[string]error{},
 		resolution: make([]float32, 2),
 		cursor:     make([]float32, 2),
+		queue:      queue,
 	}
 	g.uniforms = map[string]any{
 		"Resolution": g.resolution,
 		"Cursor":     g.cursor,
+	}
+	g.eng = &control.Engine{
+		SM:        g.sm,
+		Tapper:    g.tapper,
+		ShaderDir: shaderDir,
+		FPS:       ebiten.ActualFPS,
 	}
 
 	w, err := filewatcher.New(shaderDir)
@@ -151,6 +167,19 @@ func processEvents(
 	}
 }
 
+// readShader は os.ReadFile を包み、読み込みに失敗したら制御口の last_error にも記録する。
+// 再コンパイルの失敗は Engine.ReloadFile が自分で記録するが、読み込みの失敗はここを通らないと残らない。
+func (g *Game) readShader(path string) ([]byte, error) {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		g.eng.RecordError(control.NameFromPath(path), err.Error())
+
+		return nil, err
+	}
+
+	return src, nil
+}
+
 // errorLines は HUD に出すエラー行を、ファイル名順に最大 limit 件まで組み立てる。
 // エラー文にはパスが含まれるので、ファイル名は前に付けない。
 func errorLines(errs map[string]error, limit int) []string {
@@ -200,13 +229,21 @@ func logShaderList(names []string) {
 }
 
 func (g *Game) Update() error {
+	if g.quit.Load() {
+		return ebiten.Termination
+	}
+
 	if paths := drainEvents(g.watcher.Events, maxEventsPerFrame); len(paths) > 0 {
 		before := g.sm.Len()
-		processEvents(paths, os.ReadFile, g.sm.Reload, g.errs)
+		// reload を Engine 経由にして、HUD の errs と制御口の last_error の両方を更新する。
+		processEvents(paths, g.readShader, g.eng.ReloadFile, g.errs)
 		if g.sm.Len() > before {
 			logShaderList(g.sm.Names())
 		}
 	}
+
+	// 制御口からの処理（状態の読み取り・切替・差し替え）はここでだけ実行する
+	g.queue.Drain(g.eng)
 
 	shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) ||
 		ebiten.IsKeyPressed(ebiten.KeyShiftRight)
@@ -266,6 +303,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
+	g.eng.Resolution = [2]int{w, h}
 	g.resolution[0], g.resolution[1] = float32(w), float32(h)
 	g.uniforms["Time"] = float32(time.Since(g.startAt).Seconds())
 	g.uniforms["Beat"] = g.tapper.Phase(time.Now())
@@ -356,11 +394,57 @@ func main() {
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowTitle("KageLife")
 
-	g, err := NewGame()
+	shaderDirFlag := flag.String("shaders", "shaders", "シェーダー（*.kage）を置くディレクトリ")
+	controlAddr := flag.String("control-addr", "127.0.0.1:0", "制御口の待受アドレス（ループバックのみ。ポート 0 は空きポート）")
+	flag.Parse()
+
+	if err := run(*shaderDirFlag, *controlAddr); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run は制御口を起動してからゲームを回し、終了時に制御口を閉じて発見ファイルを消す。
+func run(shaderDirArg, controlAddr string) error {
+	shaderDir, err := filepath.Abs(shaderDirArg)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("shader dir: %w", err)
 	}
+
+	queue := control.NewQueue(64)
+	g, err := NewGame(shaderDir, queue)
+	if err != nil {
+		return err
+	}
+	defer g.watcher.Close()
+
+	ctl, err := control.Start(control.Config{
+		Addr:      controlAddr,
+		ShaderDir: shaderDir,
+		Compile:   ebitenCompiler,
+		Queue:     queue,
+	})
+	if err != nil {
+		return err
+	}
+	log.Printf("control: listening on %s (discovery: %s)", ctl.Addr(), ctl.DiscoveryFile())
+	defer func() {
+		if err := ctl.Close(); err != nil {
+			log.Printf("warn: control close: %v", err)
+		}
+	}()
+
+	// Ctrl+C / SIGTERM でも正常終了の経路（発見ファイルの削除）を通す
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
+	go func() {
+		<-sig
+		g.quit.Store(true)
+	}()
+
 	if err := ebiten.RunGame(g); err != nil && !errors.Is(err, ebiten.Termination) {
-		log.Fatal(err)
+		return err
 	}
+
+	return nil
 }
