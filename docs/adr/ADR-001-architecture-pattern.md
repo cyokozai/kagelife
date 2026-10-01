@@ -1,7 +1,7 @@
 # ADR-001: アーキテクチャパターン — フラットモノリス（2026-09-30 改訂: `main` + `internal/` 3 パッケージ）
 
 **ステータス**: Accepted（2026-09-30 改訂）
-**日付**: 2026-04-18（改訂: 2026-09-30）
+**日付**: 2026-04-18（改訂: 2026-09-30／2026-10-02。`internal/control`（#24、制御口 v1）と `internal/uniform`（W2-1）をパッケージ表に追加）
 **決定者**: cyokozai
 
 ---
@@ -48,25 +48,27 @@ Ebitengineのゲームループ（`Update/Draw/Layout`）が中心構造を規�
 
 | パッケージ | ファイル | 責務 |
 |-----------|---------|------|
-| `main` | `main.go` | `Game`（`Update` / `Draw` / `Layout` / `LayoutF`）、キー入力、Uniform の組み立て、クロスフェードの描画、HUD |
+| `main` | `main.go` | `Game`（`Update` / `Draw` / `Layout` / `LayoutF`）、キー入力、クロスフェードの描画、HUD |
 | `internal/filewatcher` | `watcher.go` | fsnotify による `shaders/` の監視と 100ms のデバウンス（[ADR-002](ADR-002-hotreload-mechanism.md)） |
 | `internal/shadermgr` | `manager.go` | シェーダーのロード・再ロード・切り替え・`Dispose()`、クロスフェードの状態（[ADR-008](ADR-008-crossfade-compositing.md)） |
 | `internal/tempo` | `tapper.go` | タップテンポ（BPM と拍の位相） |
+| `internal/control` | `server.go` ほか | 制御口 v1（127.0.0.1 の HTTP/JSON、トークン認証、Update キュー、diagnostics の整形）。ebiten 非依存（[ADR-006](ADR-006-control-api.md)、#24 で追加） |
+| `internal/uniform` | （W2-1 で追加） | 予約 Uniform（`Time` / `Resolution` / `Beat` / `Cursor` / `Frame` / `Random`）の組み立て。`Builder.Build(Input) map[string]any` で、map とスライスは使い回し、`Random` は呼び出し側から渡す |
 
 当初案との差分:
 
 - `game.go` は独立させず、`Game` は `main.go` にある
-- `uniform.go`（`UniformBuilder`）は作っておらず、Uniform は `Game.Draw()` の中で組み立てる
+- `uniform.go`（`UniformBuilder`）の代わりに `internal/uniform` パッケージを置いた（W2-1。それまでは `Game.Draw()` の中で組み立てていた）
 - `shadermgr` は `ebiten` に直接依存しない。コンパイル関数（`ShaderCompiler`）と `Dispose()` だけを持つ `Shader` インタフェースを外から受け取るため、GPU 無しでユニットテストできる
-- 3 つの `internal/` パッケージにはそれぞれ `_test.go` がある
+- `internal/` の各パッケージにはそれぞれ `_test.go` がある
 
-MCP 連携（[ADR-005](ADR-005-mcp-process-topology.md) / [ADR-006](ADR-006-control-api.md)）では、4 つ目のパッケージとして制御口の `internal/control`（ebiten 非依存）を足す予定である（feat/mcp-control-api、未実装）。
+MCP 連携（[ADR-005](ADR-005-mcp-process-topology.md) / [ADR-006](ADR-006-control-api.md)）では、制御口の `internal/control`（ebiten 非依存）を足した（#24、制御口 v1）。
 MCP の中継 `kagelife-mcp` は別リポジトリの別バイナリなので、kagelife 本体が単一バイナリ・単一モジュールである点は変わらない。
 構成図は [architecture-decisions.md](../architecture-decisions.md) の「MCP 連携」の節を参照。
 
 ## 影響・結果
 
-**ポジティブ**: 実装速度が最大化される。`internal/` の 3 パッケージは Ebitengine のゲームループから切り離してテストできる
+**ポジティブ**: 実装速度が最大化される。`internal/` のパッケージは Ebitengine のゲームループから切り離してテストできる
 **ネガティブ**: V2でシェーダーレイヤー合成を追加する際にリファクタリングが必要になる可能性（合成の布石は [ADR-008](ADR-008-crossfade-compositing.md) を参照）
 
 **Action Items**:

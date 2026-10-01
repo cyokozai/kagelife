@@ -1,7 +1,7 @@
 # ADR-006: 制御口 v1 の契約 — localhost HTTP/JSON ＋ Update キュー
 
 **ステータス**: Accepted
-**日付**: 2026-09-30（改訂: 2026-10-01。BPM の扱いを ADR-008 D3 に合わせた。PRD Q-008）
+**日付**: 2026-09-30（改訂: 2026-10-01。BPM の扱いを ADR-008 D3 に合わせた。PRD Q-008／2026-10-02。制御口 v1 の実装（PR #24）に合わせ、補足 14 の理由を直し、補足 16〜18（コンパイルに失敗したファイル、フェード中の再指示、`last_error.message` の形）を追加した）
 **決定者**: cyokozai
 **関連**: ADR-002（fsnotify + buffered channel）、ADR-005（プロセス構成）、[ADR-008](ADR-008-crossfade-compositing.md)（クロスフェードと BPM の既定値・制限）、assumptions-20260930 #4 #5 #10
 
@@ -70,7 +70,8 @@ kagelife の feat/mcp-control-api（GUI 側）と kagelife-mcp の feat/mcp-stdi
  "fps":59.9,"resolution":[1280,720],
  "last_error":null}
 ```
-`last_error` は `{"shader":"x","message":"..."}` または null（ファイル監視経由のコンパイル失敗も含む最新のもの。寿命は補足 8）。`active` はシェーダ 0 本なら `""`。
+`last_error` は `{"shader":"x","message":"..."}` または null（ファイル監視経由のコンパイル失敗も含む最新のもの。寿命は補足 8、`message` の形は経路で異なる: 補足 18）。`active` はシェーダ 0 本なら `""`。
+`shaders` はファイル名順で、コンパイルに失敗したファイルも含む（補足 16）。
 `bpm` は常に 40〜300 で、0（未設定）にはならない。タップ前は既定の 120（[ADR-008](ADR-008-crossfade-compositing.md) D3）。`bpm_measured` は、`bpm` が既定値のままなら false、タップまたは `POST /v1/bpm` で設定された値なら true（`tempo.Tapper.Measured()` に当たる）。
 
 #### GET /v1/shaders/{name}
@@ -87,19 +88,19 @@ body `{"source":"..."}`。処理順:
    ```
    - diagnostics はソースの行数以内のものだけ（Ebitengine は内部コードを連結して解析するため、範囲外の行は捨てる）。最大 10 件
    - 構文エラーは `errors.As(err, *scanner.ErrorList)` で取れる。意味エラーは文字列 `行:列: メッセージ`（改行区切り）を解析する。どちらにも当たらないものは `line=0,col=0` で message にそのまま入れる
-5. 成功 → `<shader_dir>/<name>.kage` に書き込み（同ディレクトリの一時ファイル＋rename）、Manager で差し替え（無ければ末尾に追加）。
+5. 成功 → `<shader_dir>/<name>.kage` に書き込み（同ディレクトリの一時ファイル＋rename）、Manager で差し替え（無ければファイル名順の位置に追加。2026-10-02 改訂、旧版は「末尾に追加」）。
    200 `{"name":"x","created":true}`（新規なら true、既存の差し替えなら false。ファイル基準: 補足 7）
    直後に fsnotify 経由で同じファイルが再読込されても害が無いこと
-   成功してもアクティブにはしない（0 本の状態を除く。補足 14）
+   成功してもアクティブにはしない（表示中のシェーダが無い状態を除く。補足 14）
 
 #### POST /v1/switch
-body `{"name":"x"}` → 200 `{"active":"x"}` / 404 `not_found`
+body `{"name":"x"}` → 200 `{"active":"x"}` / 404 `not_found`（コンパイルに失敗したファイルも 404。補足 16）
 
 #### POST /v1/crossfade
 body `{"name":"x","beats":4}`（beats 省略時は現在の FadeBeats。指定時は 0 < beats <= 64）。
 200 `{"target":"x","beats":4.0}` / 404 `not_found` / 400 `invalid_beats`。
 BPM は常に 40〜300 で 0 にならないため、BPM を理由に失敗することはない（タップ前は既定の 120 BPM で進む。[ADR-008](ADR-008-crossfade-compositing.md) D3）。
-判定順は 名前 400 → beats 400 → 未読込 404（補足 4）。beats 指定はプリセットを変えない（補足 5）。フェードしていない active への crossfade は何もせず 200（補足 6）
+判定順は 名前 400 → beats 400 → 未読込 404（補足 4。コンパイルに失敗したファイルも未読込として 404: 補足 16）。beats 指定はプリセットを変えない（補足 5）。フェードしていない active への crossfade は何もせず 200（補足 6）。フェード中の再指示は [ADR-008](ADR-008-crossfade-compositing.md) D2 に従う（補足 17）
 
 #### POST /v1/bpm
 body `{"bpm":128}` → 40〜300 以外は 400 `invalid_bpm`。200 `{"bpm":128.0}`。
@@ -123,7 +124,7 @@ body `{"bpm":128}` → 40〜300 以外は 400 `invalid_bpm`。200 `{"bpm":128.0}
 | 400 | `invalid_beats` | beats が 0 以下または 64 超 |
 | 400 | `invalid_bpm` | bpm が 40〜300 の外 |
 | 401 | `unauthorized` | トークンの欠落・不一致 |
-| 404 | `not_found` | シェーダが無い、または未定義パス |
+| 404 | `not_found` | シェーダが無い、または未定義パス。switch・crossfade では、コンパイルに失敗したファイルも含む（補足 16） |
 | 405 | `method_not_allowed` | メソッド違い |
 | 413 | `too_large` | ソースが 64KiB 超、または JSON 本文全体が 1MiB 超 |
 | 422 | `unit_pixels_required` | `//kage:unit pixels` の行が無い |
@@ -148,8 +149,25 @@ feat/mcp-control-api の実装で確定した補足。本節と実装が食い�
 11. **PUT の loop_timeout**: PUT が `loop_timeout` になった場合、ファイルは書き込み済みである。反映はファイル監視に任せる
 12. **本文の上限**: JSON 本文全体の上限は 1MiB（413 `too_large`）。source 単体は 64KiB まで
 13. **発見ファイルの削除**: 終了時の削除は、ファイルの中の token が自分のものと一致するときだけ行う（後から起動した別の GUI の発見ファイルを消さない）
-14. **PUT とアクティブ**: PUT は成功してもアクティブにしない（切り替えは switch / crossfade で行う）。例外として、シェーダが 0 本の状態で PUT すると、その 1 本が表示される。Manager は常に index 0 を表示し、「何も表示しない」状態を持たないため
+14. **PUT とアクティブ**: PUT は成功してもアクティブにしない（切り替えは switch / crossfade で行う）。例外として、表示中のシェーダが無い状態で PUT が成功すると、そのシェーダが表示される。表示中のシェーダが無い状態とは、A（アクティブ）がシェーダを持たないスロット（コンパイルに失敗したファイルの nil のスロット）を指している状態、またはスロットが 0 本の状態で、シェーダが 0 本のときだけでなく、全ファイルがコンパイルに失敗したときも当たる。shadermgr は A が nil のスロットを指しているときに限り、差し替えに成功したスロットへ A を寄せる（A がシェーダを持つなら動かさない。ファイル監視経由の再読込の成功も同じ規則）。（2026-10-02 改訂。旧版の理由「Manager は常に index 0 を表示する」はファイル名順のスロット固定の導入で古くなった）
 15. **発見ファイルの `version`**: 1 に固定する。クライアント（`kagelife-mcp`）は 1 以外を受け付けない
+
+### 補足（2026-10-02 追加）
+
+制御口 v1 の実装（PR #24、ファイル名順のスロット固定・nil のスロット・フェード中の再指示・A の寄せを持つ shadermgr の上に作り直したもの）で見つかった、契約の書き足し。番号は補足 1〜15 から続ける。
+
+16. **コンパイルに失敗したファイル**: `shader_dir` にあってもコンパイルに失敗しているファイル（起動時の読み込みやファイル監視での失敗。shadermgr の nil のスロット）は、`GET /v1/state` の `shaders` にファイル名順で出るが、switch / crossfade では読み込まれていないものとして 404 `not_found` を返す（message で `last_error` を見るよう促す）。`GET /v1/shaders/{name}` はファイル基準なので、この場合も 200 でソースを返す。PUT のコンパイル失敗はファイルにも Manager にも触れないため、新しい名前なら `shaders` にも出ない。全ファイルがコンパイルに失敗している状態では、`active` は `""` ではなく A が指す nil のスロットの名前になる（`active` が `""` になるのはスロットが 0 本のときだけ）
+17. **フェード中の再指示**: フェード中の crossfade は [ADR-008](ADR-008-crossfade-compositing.md) D2 の規則に従う（キー操作と同じ shadermgr の規則。beats を指定しても同じ）
+    - 進行中のフェードの B と同じ先: 無視してフェードを続ける。200 の `beats` は進行中のフェードの拍数を返す（新しく指定した beats は使わない）
+    - Mix < 0.5 で、元の A: フェードを取りやめ、A のままにする。200 を返す
+    - 上記以外で Mix ≥ 0.5: B を確定させて新しい A とし、そこから指示先へのフェードを 0 から始める
+    - 上記以外で Mix < 0.5: A のままにして、指示先へのフェードを 0 から始める
+
+    どの場合も 200 の `target` は指示した名前である。取りやめたか、どこからフェードしているかは `GET /v1/state` の `active` と `fade` で確かめる。フェードしていないときの active への指示は補足 6
+18. **`last_error.message` の形**: 記録した経路で形が異なる。クライアントは `message` を解析せず、位置が要るときは PUT の `diagnostics` を使う
+    - ファイル監視経由のコンパイル失敗: `shadermgr.CompileError` の形。各行が `<絶対パス>:<行>:<列>: <メッセージ>`、行・列の形に合わない行は `<絶対パス>: <メッセージ>` で、複数あれば改行区切り。行番号は Ebitengine が返したままで、diagnostics のようにソースの行の範囲内へ絞らない
+    - ファイル監視経由の読み込み失敗（ファイルを読めない）: OS のエラー文（パスを含む）。補足 8 の「コンパイル失敗」に加えて、これも `last_error` を上書きする
+    - PUT のコンパイル失敗: 422 の `message` と同じ diagnostics の要約。`shader compilation failed: <先頭の診断>` で、先頭の診断は `<行>:<列>: <メッセージ>`（位置不明ならメッセージのみ）、2 件以上なら末尾に ` (and <残りの件数> more)` が付く。パスは含まない
 
 ---
 
@@ -199,7 +217,7 @@ sequenceDiagram
     HTTP->>Q: Command{差し替え, Reply chan}
     UPD->>Q: 毎 tick キューを読み切る
     UPD->>SM: 差し替え（旧シェーダを Dispose）
-    Note over UPD,SM: アクティブは変えない（0 本だった場合を除く）
+    Note over UPD,SM: アクティブは変えない（表示中のシェーダが無かった場合を除く。補足 14）
     UPD-->>HTTP: Reply{created}
     HTTP-->>MCP: 200 {"name":"x","created":false}
     MCP-->>LLM: 結果（成功）
@@ -259,3 +277,5 @@ sequenceDiagram
 - [ ] ループバック以外の `-control-addr` で起動エラーになることをテストする
 - [ ] 発見ファイルが 0600 で書かれ、正常終了時に消えることをテストする（token が一致しないときは消さないことも）
 - [ ] 補足 1〜15 をそれぞれテストで固定する（feat/mcp-control-api）
+- [ ] 補足 14 の改訂と補足 16〜18 をテストで固定する（PR #24 の `internal/control` と `internal/shadermgr` のテスト）
+- [ ] 仕様の確認: 全ファイルがコンパイルに失敗した状態で `active` に switch できない nil のスロットの名前が入る（補足 16）。`active` を null にするか決める
