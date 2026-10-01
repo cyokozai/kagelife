@@ -1,4 +1,5 @@
 # ADR-004 (docs/adr/ADR-004-cicd-release.md) の ci.yml（品質チェック）
+# release.yml からも workflow_call で関門として呼ばれる。
 name: CI
 
 on:
@@ -6,12 +7,15 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # workflow_call で呼ばれたときは github.workflow が呼び出し側（Release）の名前になる。
+  # 呼び出し側と同じ group にしないよう接尾辞を付ける。
+  group: ${{ github.workflow }}-ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -24,16 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Ebitengine build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libc6-dev libgl1-mesa-dev libxcursor-dev libxi-dev \
-            libxinerama-dev libxrandr-dev libxxf86vm-dev libasound2-dev pkg-config
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-ebiten
 
       - name: gofmt
         run: |
@@ -48,7 +43,10 @@ jobs:
         run: go vet ./...
 
       - name: go test
-        run: go test ./...
+        run: go test -race ./...
+
+      - name: go build (linux/amd64)
+        run: make build-linux-amd64
 
   lint:
     name: lint
@@ -56,16 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Ebitengine build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libc6-dev libgl1-mesa-dev libxcursor-dev libxi-dev \
-            libxinerama-dev libxrandr-dev libxxf86vm-dev libasound2-dev pkg-config
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-ebiten
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
