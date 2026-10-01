@@ -11,6 +11,6 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 
 	env := pow(1.0-Beat, 3.0)
 	radius := 0.1 + env*0.4
-	c := smoothstep(radius, radius-0.05, d)
+	c := 1.0 - smoothstep(radius-0.05, radius, d)
 	return vec4(c, c*env, c*(1.0-env), 1.0)
 }
