@@ -69,13 +69,28 @@ func clampBPM(span float64, intervals int) float64 {
 	return math.Min(MaxBPM, math.Max(MinBPM, 60/(span/float64(intervals))))
 }
 
-// BPM は現在のテンポを返す。窓内のタップ間隔の平均から求めた測定値（MinBPM..MaxBPM）、
-// まだ測定していなければ DefaultBPM。
+// SetBPM は BPM を外から直接設定し（制御口の set_bpm）、now を拍頭にする。
+// 範囲外は MinBPM..MaxBPM に丸め、NaN は無視する。設定した値は測定値として扱う（Measured() が true）。
+// これまでのタップ履歴は捨てるので、以後 1 回だけのタップは拍頭の合わせ直しになり、
+// 2 回以上のタップで測った BPM が設定値を上書きする。
+func (tp *Tapper) SetBPM(bpm float64, now time.Time) {
+	if math.IsNaN(bpm) {
+		return
+	}
+
+	tp.taps = tp.taps[:0]
+	tp.bpm = math.Min(MaxBPM, math.Max(MinBPM, bpm))
+	tp.measured = true
+	tp.origin, tp.hasOrigin = now, true
+}
+
+// BPM は現在のテンポを返す。窓内のタップ間隔の平均から求めた測定値か SetBPM の値（MinBPM..MaxBPM）、
+// まだどちらも無ければ DefaultBPM。
 func (tp *Tapper) BPM() float64 {
 	return tp.bpm
 }
 
-// Measured は BPM が測定値なら true、既定値なら false を返す。
+// Measured は BPM がタップの測定値か SetBPM の値なら true、既定値なら false を返す。
 func (tp *Tapper) Measured() bool {
 	return tp.measured
 }

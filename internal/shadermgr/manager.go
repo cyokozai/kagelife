@@ -34,6 +34,7 @@ type Manager struct {
 	progress     float64        // フェードの積算進捗（0〜1）
 	lastTick     time.Time      // 前回 TickAt の時刻
 	hasLastTick  bool           // lastTick が有効か（フェード開始直後・凍結明けは false）
+	fadeOverride float32        // BeginFadeBeats で指定した拍数（0 ならプリセットに従う）
 	Compiler     ShaderCompiler // コンパイル関数
 }
 
@@ -62,19 +63,58 @@ func (m *Manager) Reload(path string, src []byte) error {
 	path = filepath.Clean(path)
 	newShader, err := m.Compiler(src)
 
+	i, _ := m.slotFor(path)
+	if err != nil {
+		return &CompileError{Path: path, Err: err}
+	}
+	m.put(i, newShader)
+
+	return nil
+}
+
+// Install はコンパイル済みのシェーダーを path のスロットに登録する（制御口の PUT 用）。
+// 既存のスロットなら旧シェーダーを Dispose して差し替え、無ければファイル名順の位置に挿入する。
+// A の扱いは Reload の成功時と同じ（A が nil のスロットを指していたときだけ寄せる）。
+// スロットを新しく作ったら true を返す。shader は nil にしないこと。
+func (m *Manager) Install(path string, shader Shader) bool {
+	i, created := m.slotFor(filepath.Clean(path))
+	m.put(i, shader)
+
+	return created
+}
+
+// IndexOf は path（Clean して比べる）のスロット位置を返す。無ければ -1。
+// コンパイルに失敗した nil のスロットも位置を返す（使えるかは Usable で確かめる）。
+func (m *Manager) IndexOf(path string) int {
+	i, found := m.find(filepath.Clean(path))
+	if !found {
+		return -1
+	}
+
+	return i
+}
+
+// Usable は idx が範囲内かつシェーダーを持つ（Switch・BeginFade できる）スロットかを返す。
+func (m *Manager) Usable(idx int) bool {
+	return m.usable(idx)
+}
+
+// slotFor は path のスロット位置を返す。無ければ nil のスロットを挿入し、作ったことを true で返す。
+func (m *Manager) slotFor(path string) (int, bool) {
 	i, found := m.find(path)
 	if !found {
 		m.insert(i, slot{path: path})
 	}
 
-	if err != nil {
-		return &CompileError{Path: path, Err: err}
-	}
+	return i, !found
+}
 
+// put はスロット i のシェーダーを差し替える。
+func (m *Manager) put(i int, shader Shader) {
 	if old := m.slots[i].shader; old != nil {
 		old.Dispose() // 旧シェーダーを解放してから差し替え
 	}
-	m.slots[i].shader = newShader
+	m.slots[i].shader = shader
 
 	// A が nil のスロット（起動時の失敗など）を指していれば、成功したスロットに寄せる。
 	// A が nil でなければ動かさない（ライブコーディング中に勝手に切り替えない）。
@@ -82,8 +122,6 @@ func (m *Manager) Reload(path string, src []byte) error {
 	if m.slots[m.activeAIdx].shader == nil {
 		m.activeAIdx = i
 	}
-
-	return nil
 }
 
 // Remove は path のスロットを Dispose してから取り除く。
@@ -189,7 +227,24 @@ func (m *Manager) MixRatio() float32 {
 //   - フェード中に別のインデックスを指定したら、Mix ≥ 0.5 なら B を A として確定し、
 //     Mix < 0.5 なら A のままにしたうえで、新しいフェードを始める。
 //     その結果の A と idx が同じなら、フェードを取りやめる。
+//
+// 拍数はプリセット（FadeBeats）に従い、フェード中にプリセットを変えると進行中のフェードにも効く。
 func (m *Manager) BeginFade(idx int) {
+	m.beginFade(idx, 0)
+}
+
+// BeginFadeBeats は beats 拍で idx へのフェードを始める（制御口の crossfade の beats 指定）。
+// プリセットは変えない。beats が 0 以下なら何もしない。
+// 無視・取りやめの規則は BeginFade と同じで、無視したときは進行中のフェードの拍数も変えない。
+func (m *Manager) BeginFadeBeats(idx int, beats float32) {
+	if beats <= 0 {
+		return
+	}
+	m.beginFade(idx, beats)
+}
+
+// beginFade は BeginFade の本体。override が 0 より大きければ、新しく始めるフェードの拍数にする。
+func (m *Manager) beginFade(idx int, override float32) {
 	if !m.usable(idx) {
 		return
 	}
@@ -214,6 +269,22 @@ func (m *Manager) BeginFade(idx int) {
 	m.mixRatio = 0
 	m.progress = 0
 	m.hasLastTick = false
+	m.fadeOverride = override
+}
+
+// FadeTargetIndex はフェード先 B のインデックスを返す。フェード中でなければ -1。
+func (m *Manager) FadeTargetIndex() int {
+	return m.activeBIdx
+}
+
+// CurrentFadeBeats は進行中（または次に BeginFade で始まる）フェードの拍数を返す。
+// BeginFadeBeats で始めたフェードの最中ならその拍数、それ以外はプリセットの値。
+func (m *Manager) CurrentFadeBeats() float32 {
+	if m.fadeOverride > 0 {
+		return m.fadeOverride
+	}
+
+	return m.FadeBeats()
 }
 
 // Tick は現在時刻でフェードを進める。
@@ -244,7 +315,7 @@ func (m *Manager) TickAt(now time.Time, bpm float64) {
 	elapsed := max(now.Sub(m.lastTick).Seconds(), 0)
 	m.lastTick = now
 
-	fadeDuration := float64(FadePresets[m.fadeBeatsIdx]) * 60.0 / bpm
+	fadeDuration := float64(m.CurrentFadeBeats()) * 60.0 / bpm
 	m.progress += elapsed / fadeDuration
 	if m.progress >= 1.0 {
 		m.activeAIdx = m.activeBIdx
@@ -271,9 +342,10 @@ func (m *Manager) DecFadeBeats() {
 	}
 }
 
-// endFade はフェードを終え、B を解除する（A はそのまま）。
+// endFade はフェードを終え、B と指定拍数を解除する（A はそのまま）。
 func (m *Manager) endFade() {
 	m.activeBIdx = -1
+	m.fadeOverride = 0
 	m.fading = false
 	m.mixRatio = 0
 	m.progress = 0
