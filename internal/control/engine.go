@@ -185,6 +185,15 @@ func (e *Engine) ReloadFile(path string, src []byte) error {
 	return nil
 }
 
+// RemoveFile はファイル監視で削除を検知した path のシェーダを外し、
+// last_error がそのファイルのものなら消す（無くなったファイルのエラーを出し続けないため）。
+func (e *Engine) RemoveFile(path string) {
+	e.SM.Remove(path)
+	if e.lastErr != nil && e.lastErr.Shader == NameFromPath(path) {
+		e.lastErr = nil
+	}
+}
+
 // RecordError は last_error を記録する。
 func (e *Engine) RecordError(shader, message string) {
 	e.lastErr = &LastError{Shader: shader, Message: message}
