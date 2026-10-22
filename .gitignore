@@ -22,6 +22,7 @@ go.work.sum
 # ビルド成果物
 kagelife
 kagelife-*
+dist/
 
 
 # ============================== Terraform ============================== #
@@ -152,9 +153,9 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/linux,macos,windows
 
+# Claude local
+.claude/*
+
 # vim
 *.swp
 *.swo
-
-# Claude local
-.claude/*
