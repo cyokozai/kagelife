@@ -74,7 +74,7 @@ Mix は「開始時刻からの経過時間」ではなく、フレームごと�
 - [x] D2: フェード中の再指示を上表のとおりに扱い、ユニットテストを書く（W1-3、`internal/shadermgr`）
 - [x] D3: 既定 120 BPM・直前の BPM の保持・40〜300 の制限を `internal/tempo` に入れ、ユニットテストを書く（W1-4。測った BPM かどうかを返す `Measured()` も追加）
 - [x] 進み具合を積算に変え、拍数・BPM の途中変更で Mix が飛ばないことをユニットテストで確かめる（W1-3、`TickAt`）
-- [ ] `Measured()` を HUD に表示する（第 2 波）
+- [x] `Measured()` を HUD に表示する（既定値の BPM に `(default)` を付ける。W2-1）
 - [x] 制御口の契約（ADR-006）の BPM の扱いを D3 と揃える（PRD Q-008、2026-10-01）
 - [ ] feat/mcp-control-api で、BPM の範囲（40〜300）と `bpm_measured` をテストで固定する
 
