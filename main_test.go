@@ -150,7 +150,7 @@ func TestErrorLines(t *testing.T) {
 func TestHUDText(t *testing.T) {
 	t.Run("状態行のあとにエラー行が続く", func(t *testing.T) {
 		errs := map[string]error{"a.kage": errors.New("boom")}
-		got := hudText(120, true, 4, 0.25, errs)
+		got := hudText(120, true, 4, 0.25, errs, nil)
 		want := "BPM: 120.0  FadeBeats: 4.0  Mix: 0.25\nERROR: boom"
 		if got != want {
 			t.Fatalf("got %q, want %q", got, want)
@@ -158,14 +158,14 @@ func TestHUDText(t *testing.T) {
 	})
 
 	t.Run("エラーが無ければ状態行だけ", func(t *testing.T) {
-		got := hudText(0, true, 0.5, 0, nil)
+		got := hudText(0, true, 0.5, 0, nil, nil)
 		if strings.Contains(got, "\n") {
 			t.Fatalf("got %q", got)
 		}
 	})
 
 	t.Run("タップ前の既定 BPM には (default) を付ける", func(t *testing.T) {
-		got := hudText(120, false, 4, 0, nil)
+		got := hudText(120, false, 4, 0, nil, nil)
 		want := "BPM: 120.0 (default)  FadeBeats: 4.0  Mix: 0.00"
 		if got != want {
 			t.Fatalf("got %q, want %q", got, want)
@@ -260,6 +260,34 @@ func TestParseFlags(t *testing.T) {
 			t.Fatalf("opts = %+v, want version", opts)
 		}
 	})
+
+	t.Run("-llm-slots は既定で無効", func(t *testing.T) {
+		opts, err := parseFlags(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if opts.llmSlots != nil {
+			t.Fatalf("llmSlots = %#v, want nil", opts.llmSlots)
+		}
+	})
+
+	t.Run("-llm-slots はフラグの順で受け取る", func(t *testing.T) {
+		opts, err := parseFlags([]string{"-llm-slots", "llm_b,llm_a"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(opts.llmSlots, []string{"llm_b", "llm_a"}) {
+			t.Fatalf("llmSlots = %#v", opts.llmSlots)
+		}
+	})
+
+	for _, bad := range []string{"llm_a,llm_a", "llm_a,llm_b,llm_c", "LLM_A", "llm_a,"} {
+		t.Run("-llm-slots の違反は起動エラー: "+bad, func(t *testing.T) {
+			if _, err := parseFlags([]string{"-llm-slots", bad}); err == nil || !strings.Contains(err.Error(), "-llm-slots") {
+				t.Fatalf("err = %v, want a -llm-slots error", err)
+			}
+		})
+	}
 }
 
 func TestVersionString(t *testing.T) {
@@ -279,7 +307,7 @@ func TestVersionDefaultsToDev(t *testing.T) {
 }
 
 func TestShaderListLines(t *testing.T) {
-	got := shaderListLines([]string{"shaders/a.kage", "shaders/b.kage"})
+	got := shaderListLines([]string{"shaders/a.kage", "shaders/b.kage"}, nil)
 	want := []string{"shader 1: shaders/a.kage", "shader 2: shaders/b.kage"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
