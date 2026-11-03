@@ -1,7 +1,7 @@
 # アーキテクチャ設計書: KageLife
 
 **作成日**: 2026-04-18
-**更新日**: 2026-09-30（MCP 連携の節を追加）
+**更新日**: 2026-10-22（段階 3: 自律演出の節を追加）
 
 ---
 
@@ -319,8 +319,62 @@ type Diagnostic struct {
 
 | 対象 | リポジトリ | テスト | CI |
 |------|-----------|-------|----|
-| `internal/control` | kagelife | 認証・名前検査・本文とソースの上限・`unit_pixels_required`・diagnostics 整形・`loop_timeout`・ADR-006 補足 1〜18（httptest、モックのコンパイラ、偽の Update） | 入れる |
+| `internal/control` | kagelife | 認証・名前検査・本文とソースの上限・`unit_pixels_required`・diagnostics 整形・`loop_timeout`・ADR-006 補足 1〜20（httptest、モックのコンパイラ、偽の Update） | 入れる |
 | diagnostics の実データ | kagelife | `ebiten.NewShader` の実エラーからの整形 | NewShader はウィンドウ無しで動くので入れられる |
 | MCP サーバ | kagelife-mcp | ツールのスキーマ・中継・`isError` の形・`version` 検査・stdin EOF 終了（偽の制御口） | 入れる（`-race`、純 Go） |
 | GUI とキューの結合 | kagelife | 往復時間・差し替え | 入れない（ウィンドウが要る。Alpine で SIGSEGV）。macOS 実機で手動 |
 | 両者を結合した E2E | 両方にまたがる | 実 GUI ＋ 実 `kagelife-mcp` | 入れない。macOS 実機で手動 |
+
+---
+
+## 段階 3: 自律演出（2026-10-22 追加）
+
+LLM が曲に合わせて自分から演出を変えるための構成（2026-10-19 決定、PRD v0.5 §12）。
+決定の経緯は [ADR-009](adr/ADR-009-audio-analysis-in-process.md)（音声入力を本体に同居させ `-audio` で有効にする。重い解析は外部クライアント）、[ADR-010](adr/ADR-010-autonomous-conductor.md)（LLM は予約し、GUI が拍で実行し、人の操作が優先する）。
+制御口の契約は引き続き ADR-006 に置き、#24 のマージ前に未知のフィールドの拒否（補足 19）と `features`（補足 20）を足す。
+
+### ADR の一覧
+
+| ADR | 決定 | ステータス |
+|-----|------|-----------|
+| [ADR-001](adr/ADR-001-architecture-pattern.md) | アーキテクチャパターン — フラットモノリス（`main` ＋ `internal/`） | Accepted（2026-09-30 改訂） |
+| [ADR-002](adr/ADR-002-hotreload-mechanism.md) | ホットリロード実装方式 — fsnotify ＋ buffered channel | Accepted |
+| [ADR-003](adr/ADR-003-cross-platform.md) | クロスプラットフォーム戦略 — ネイティブバイナリ（WASM 見送り）、v1.0 は cgo=1 のネイティブビルド（D4） | Accepted |
+| [ADR-004](adr/ADR-004-cicd-release.md) | CI/CD ＋ リリース自動化 — GitHub Actions | Accepted |
+| [ADR-005](adr/ADR-005-mcp-process-topology.md) | MCP のプロセス構成 — 常駐 GUI ＋ 別リポジトリの中継バイナリ | Accepted |
+| [ADR-006](adr/ADR-006-control-api.md) | 制御口 v1 の契約 — localhost HTTP/JSON ＋ Update キュー | Accepted（2026-10-22 補足 19・20） |
+| [ADR-007](adr/ADR-007-mcp-sdk-dependency.md) | MCP SDK の採用 — go-sdk v1.8.0（kagelife-mcp だけで使う） | Accepted |
+| [ADR-008](adr/ADR-008-crossfade-compositing.md) | クロスフェードと合成 — 画面外合成 ＋ 積算による進行 | Accepted |
+| [ADR-009](adr/ADR-009-audio-analysis-in-process.md) | 音声解析の置き場所 — 本体に同居（`-audio` を付けたときだけ有効）、重い解析は外部クライアント | Accepted |
+| [ADR-010](adr/ADR-010-autonomous-conductor.md) | 自律演出の位置づけ（LLM は予約、GUI が拍で実行、人が優先） | Accepted |
+
+### システム全体構成図（段階 3 追加後）
+
+```mermaid
+flowchart TD
+    subgraph R2["リポジトリ cyokozai/kagelife-mcp（純 Go・cgo なし）"]
+        MS["kagelife-mcp\nstdio 中継"]
+        CON["kagelife-conductor\n指揮役（新規・E）"]
+    end
+    subgraph R1["リポジトリ cyokozai/kagelife"]
+        CTL["制御口\nfeatures・未知のフィールドは 400\n/v1/bpm・/v1/tap（A）"]
+        AU["internal/audio（仮・D）\n-audio のときだけ有効\nmalgo・FFT・オンセット（純 Go）"]
+        UPD["Game.Update()\n拍時計（A）・演出キュー（B）\n帯域レベルの uniform（D）"]
+    end
+    CL["MCP クライアント"] -- "stdio" --> MS
+    NP["Now Playing"] --> CON
+    CON -- "曲の変わり目だけ\n演者の API キー" --> LLM["LLM API"]
+    MS -- "HTTP/JSON" --> CTL
+    CON -- "compile（C）・cues（B）" --> CTL
+    EXT["外部の推定器（BeatNet など）"] -- "BPM・タップ・拍頭" --> CTL
+    AUD["マイク／ループバック"] --> AU
+    AU -- "最新値だけ（channel）" --> UPD
+    CTL --> UPD
+    KB["キーボード（予約より優先）"] --> UPD
+```
+
+原則:
+- 拍に合わせる処理は GUI の `Update()` の 1 か所に置く。拍時計はタップ BPM と同じ時計を使い、`-audio` のオンセットも同じプロセスの同じ時計で扱う
+- 音声のコールバックのスレッドから `Update()` へは、ADR-002 の「channel に一本化」に沿って最新値だけを渡す。デバイスの不調でも描画は止めず、HUD と state に出す
+- 制御口のクライアントは `kagelife-mcp`・`kagelife-conductor`・外部の推定器になる。どれも発見ファイル（`version` 1）とトークンで接続し、任意機能は `features` で確かめる。音声の特徴量を受ける新しい口は作らない
+- 本体に足す直接依存は malgo（ADR-009）。kagelife-mcp は純 Go を保ち、音声を扱わない
