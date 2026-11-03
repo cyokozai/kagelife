@@ -40,6 +40,7 @@ type State struct {
 	FPS         float64    `json:"fps"`
 	Resolution  [2]int     `json:"resolution"`
 	LastError   *LastError `json:"last_error"`
+	Features    []string   `json:"features"`
 }
 
 // Engine はゲームループが持つ VJ 状態（シェーダとテンポ）を名前で操作する。
@@ -99,6 +100,7 @@ func (e *Engine) State() State {
 			Mix:    float64(e.SM.MixRatio()),
 			Beats:  float64(e.SM.CurrentFadeBeats()),
 		},
+		Features: Features(),
 	}
 	if e.SM.Len() > 0 {
 		st.Active = e.nameAt(e.SM.ActiveIndex())
