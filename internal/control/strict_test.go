@@ -42,7 +42,8 @@ func TestUnknownFieldsTooLargeStillWins(t *testing.T) {
 	assertError(t, st, body, 413, "too_large")
 }
 
-// state の features は常に配列（空でも [] で null にしない）。
+// state の features は常に配列で、このビルドが持つ任意機能を並べる。
+// llm_slots は -llm-slots を指定していなくても載る（設定済みかは state の llm_slots で見る）。
 func TestGetState_FeaturesIsArray(t *testing.T) {
 	h := newHarness(t, true)
 
@@ -52,8 +53,8 @@ func TestGetState_FeaturesIsArray(t *testing.T) {
 	if !ok {
 		t.Fatalf("features が無い: %v", body)
 	}
-	if got := jsonBody(v); got != "[]" {
-		t.Errorf("features = %s, want []", got)
+	if got := jsonBody(v); got != `["llm_slots"]` {
+		t.Errorf("features = %s, want [\"llm_slots\"]", got)
 	}
 }
 

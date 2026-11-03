@@ -28,6 +28,14 @@ type harness struct {
 // loop=false ならゲームループを回さない（loop_timeout の検証用）。
 func newHarness(t *testing.T, loop bool, names ...string) *harness {
 	t.Helper()
+
+	return newHarnessLLM(t, loop, nil, names...)
+}
+
+// newHarnessLLM は newHarness に -llm-slots の予約名（nil なら無効）を加えたもの。
+// 予約名は Engine と ServerConfig の両方に渡す（main と同じ）。
+func newHarnessLLM(t *testing.T, loop bool, llmSlots []string, names ...string) *harness {
+	t.Helper()
 	dir := t.TempDir()
 	for _, n := range names {
 		if err := os.WriteFile(filepath.Join(dir, n+".kage"), []byte(src("// "+n)), 0o644); err != nil {
@@ -35,12 +43,14 @@ func newHarness(t *testing.T, loop bool, names ...string) *harness {
 		}
 	}
 	h := &harness{t: t, dir: dir, eng: newTestEngine(dir, names...), q: NewQueue(16), comp: &fakeCompiler{}, stop: func() {}}
+	h.eng.LLMSlots = llmSlots
 	h.srv = httptest.NewServer(NewServer(ServerConfig{
 		Token:     testToken,
 		ShaderDir: dir,
 		Compile:   h.comp.compile,
 		Queue:     h.q,
 		Timeout:   100 * time.Millisecond,
+		LLMSlots:  llmSlots,
 	}))
 	if loop {
 		h.stop = runLoop(h.q, h.eng)

@@ -41,6 +41,8 @@ type State struct {
 	Resolution  [2]int     `json:"resolution"`
 	LastError   *LastError `json:"last_error"`
 	Features    []string   `json:"features"`
+	// LLMSlots は -llm-slots の予約名（フラグの順）。フラグ無しなら空の配列（null にしない）。
+	LLMSlots []string `json:"llm_slots"`
 }
 
 // Engine はゲームループが持つ VJ 状態（シェーダとテンポ）を名前で操作する。
@@ -55,6 +57,8 @@ type Engine struct {
 	FPS func() float64
 	// Resolution は直近の Draw の画面サイズ。
 	Resolution [2]int
+	// LLMSlots は -llm-slots の予約名（nil なら無効）。ServerConfig.LLMSlots と同じものを渡す。
+	LLMSlots []string
 
 	lastErr *LastError
 }
@@ -101,6 +105,7 @@ func (e *Engine) State() State {
 			Beats:  float64(e.SM.CurrentFadeBeats()),
 		},
 		Features: Features(),
+		LLMSlots: append([]string{}, e.LLMSlots...),
 	}
 	if e.SM.Len() > 0 {
 		st.Active = e.nameAt(e.SM.ActiveIndex())
@@ -114,6 +119,18 @@ func (e *Engine) State() State {
 	}
 
 	return st
+}
+
+// Live は name が映っているかを返す。映っているとは、active と同じ名前であるか、
+// フェード中（fading が true）で fade.target と同じ名前であること。
+// フェードしていない間の fade.target の名残は映っていない扱いにする（kagelife-mcp も同じ定義）。
+// active がコンパイルに失敗したスロット（何も描かれていない）なら、その名前は映っていない。
+func (e *Engine) Live(name string) bool {
+	if i := e.SM.ActiveIndex(); e.SM.Usable(i) && e.nameAt(i) == name {
+		return true
+	}
+
+	return e.SM.Fading() && e.nameAt(e.SM.FadeTargetIndex()) == name
 }
 
 // loadedIndex は name のスロット位置を返す。無い、またはコンパイルに失敗したスロットなら ErrNotFound。

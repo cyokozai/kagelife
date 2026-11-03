@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,9 @@ type ServerConfig struct {
 	Compile   shadermgr.ShaderCompiler
 	Queue     *Queue
 	Timeout   time.Duration // 0 なら DefaultTimeout
+	// LLMSlots は -llm-slots の予約名（nil なら無効）。空でなければ PUT はこの名前だけに書け、
+	// 映っている予約名には書けない。Engine.LLMSlots と同じものを渡す。
+	LLMSlots []string
 }
 
 // Server は制御口 v1 の http.Handler。
@@ -224,6 +228,10 @@ func (s *Server) putShader(w http.ResponseWriter, r *http.Request) {
 	if !checkName(w, name) {
 		return
 	}
+	// -llm-slots の制限は本文を読む前に判定する（名前 → 403 → 409 → 本文の順）
+	if !s.checkLLMSlot(w, name) {
+		return
+	}
 	var req struct {
 		Source *string `json:"source"`
 	}
@@ -262,6 +270,13 @@ func (s *Server) putShader(w http.ResponseWriter, r *http.Request) {
 	s.put.Lock()
 	defer s.put.Unlock()
 
+	// 本文の読み込みとコンパイルの間に映った場合に備え、書く直前にもう一度確かめる
+	if !s.checkLLMSlot(w, name) {
+		sh.Dispose()
+
+		return
+	}
+
 	created, err := writeFileAtomic(s.shaderPath(name), src)
 	if err != nil {
 		sh.Dispose()
@@ -280,6 +295,35 @@ func (s *Server) putShader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"name": name, "created": created})
+}
+
+// checkLLMSlot は -llm-slots が有効なとき、name に PUT してよいかを判定する。
+// 予約名以外なら 403 forbidden_name（ゲームループは読まない）、
+// 映っている予約名なら 409 slot_live（ゲームループ上で判定する）を書いて false を返す。
+// 無効なら常に true。
+func (s *Server) checkLLMSlot(w http.ResponseWriter, name string) bool {
+	slots := s.cfg.LLMSlots
+	if len(slots) == 0 {
+		return true
+	}
+	if !slices.Contains(slots, name) {
+		writeError(w, http.StatusForbidden, "forbidden_name", forbiddenNameMessage(slots))
+
+		return false
+	}
+	live, err := call(s.cfg.Queue, s.cfg.Timeout, func(e *Engine) bool { return e.Live(name) })
+	if err != nil {
+		writeLoopError(w)
+
+		return false
+	}
+	if live {
+		writeError(w, http.StatusConflict, "slot_live", slotLiveMessage(name, slots))
+
+		return false
+	}
+
+	return true
 }
 
 // writeFileAtomic は同じディレクトリの一時ファイルに書いてから rename する。
