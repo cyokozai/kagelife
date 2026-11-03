@@ -150,7 +150,7 @@ func TestErrorLines(t *testing.T) {
 func TestHUDText(t *testing.T) {
 	t.Run("状態行のあとにエラー行が続く", func(t *testing.T) {
 		errs := map[string]error{"a.kage": errors.New("boom")}
-		got := hudText(120, 4, 0.25, errs)
+		got := hudText(120, 4, 0.25, errs, nil)
 		want := "BPM: 120.0  FadeBeats: 4.0  Mix: 0.25\nERROR: boom"
 		if got != want {
 			t.Fatalf("got %q, want %q", got, want)
@@ -158,7 +158,7 @@ func TestHUDText(t *testing.T) {
 	})
 
 	t.Run("エラーが無ければ状態行だけ", func(t *testing.T) {
-		got := hudText(0, 0.5, 0, nil)
+		got := hudText(0, 0.5, 0, nil, nil)
 		if strings.Contains(got, "\n") {
 			t.Fatalf("got %q", got)
 		}
@@ -166,7 +166,7 @@ func TestHUDText(t *testing.T) {
 }
 
 func TestShaderListLines(t *testing.T) {
-	got := shaderListLines([]string{"shaders/a.kage", "shaders/b.kage"})
+	got := shaderListLines([]string{"shaders/a.kage", "shaders/b.kage"}, nil)
 	want := []string{"shader 1: shaders/a.kage", "shader 2: shaders/b.kage"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
