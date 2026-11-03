@@ -139,9 +139,12 @@ func writeLoopError(w http.ResponseWriter) {
 }
 
 // decodeBody は本文を v に読み込む。失敗時は応答を書いて false を返す。
+// 未知のフィールドは打ち間違いを黙って無視しないよう invalid_request で拒否する。
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
 			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "request body is too large")
