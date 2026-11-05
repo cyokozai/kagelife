@@ -175,7 +175,7 @@ func (c *Client) session(ctx context.Context, conn net.Conn) (gotStatus bool, er
 		select {
 		case <-ctx.Done():
 			_ = conn.Close()
-			<-readErr
+			<-readErr //nolint:errcheck // 読み取り側の終了を待つだけ。閉じたことによる読み取りエラーは捨てる
 			return received(), ctx.Err()
 		case err := <-readErr:
 			if err == nil {
@@ -185,7 +185,7 @@ func (c *Client) session(ctx context.Context, conn net.Conn) (gotStatus bool, er
 		case <-ticker.C:
 			if err := c.send(conn, "status"); err != nil {
 				_ = conn.Close()
-				<-readErr
+				<-readErr //nolint:errcheck // 送信のエラーを返す。読み取り側は終了を待つだけで、そのエラーは捨てる
 				return received(), err
 			}
 		}

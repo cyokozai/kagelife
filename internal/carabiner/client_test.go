@@ -171,7 +171,10 @@ func TestClientReconnectsAfterDisconnect(t *testing.T) {
 	_ = first.Close()
 
 	select {
-	case <-disconnected:
+	case err := <-disconnected:
+		if err == nil {
+			t.Error("OnDisconnect の err = nil, want 切断の理由")
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("OnDisconnect が呼ばれない")
 	}
