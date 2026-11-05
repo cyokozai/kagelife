@@ -1,6 +1,6 @@
 module github.com/cyokozai/kagelife
 
-go 1.27.1
+go 1.27.3
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
