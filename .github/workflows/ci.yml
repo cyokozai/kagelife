@@ -1,0 +1,63 @@
+# ADR-004 (docs/adr/ADR-004-cicd-release.md) の ci.yml（品質チェック）
+# release.yml からも workflow_call で関門として呼ばれる。
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  # workflow_call で呼ばれたときは github.workflow が呼び出し側（Release）の名前になる。
+  # 呼び出し側と同じ group にしないよう接尾辞を付ける。
+  group: ${{ github.workflow }}-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CGO_ENABLED: "1"
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-ebiten
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt が未適用のファイル:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race ./...
+
+      - name: go build (linux/amd64)
+        run: make build-linux-amd64
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-ebiten
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14
+          args: --max-same-issues=0 --max-issues-per-linter=0

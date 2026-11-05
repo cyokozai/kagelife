@@ -1,0 +1,20 @@
+name: Setup Ebitengine build environment
+description: >-
+  Ebitengine を cgo=1 でビルドするための準備。Linux では apt で X11 / OpenGL / ALSA の
+  開発パッケージを入れ、どの OS でも go.mod の Go を setup-go で入れる。macOS は apt を飛ばす。
+
+runs:
+  using: composite
+  steps:
+    - name: Install Ebitengine build dependencies (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libc6-dev libgl1-mesa-dev libxcursor-dev libxi-dev \
+          libxinerama-dev libxrandr-dev libxxf86vm-dev libasound2-dev pkg-config
+
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
