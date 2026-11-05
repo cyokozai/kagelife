@@ -1,7 +1,7 @@
 # ADR-006: 制御口 v1 の契約 — localhost HTTP/JSON ＋ Update キュー
 
 **ステータス**: Accepted
-**日付**: 2026-09-30（改訂: 2026-10-01。BPM の扱いを ADR-008 D3 に合わせた。PRD Q-008／2026-10-02。制御口 v1 の実装（PR #24）に合わせ、補足 14 の理由を直し、補足 16〜18（コンパイルに失敗したファイル、フェード中の再指示、`last_error.message` の形）を追加した）
+**日付**: 2026-09-30（改訂: 2026-10-01。BPM の扱いを ADR-008 D3 に合わせた。PRD Q-008／2026-10-02。制御口 v1 の実装（PR #24）に合わせ、補足 14 の理由を直し、補足 16〜18（コンパイルに失敗したファイル、フェード中の再指示、`last_error.message` の形）を追加した／2026-10-22。#24 のマージ前に入れる補足 19・20（未知のフィールドの拒否、`features`）を追加した。2026-10-19 の決定、PRD v0.5 FR-140・FR-141）
 **決定者**: cyokozai
 **関連**: ADR-002（fsnotify + buffered channel）、ADR-005（プロセス構成）、[ADR-008](ADR-008-crossfade-compositing.md)（クロスフェードと BPM の既定値・制限）、assumptions-20260930 #4 #5 #10
 
@@ -50,6 +50,8 @@ kagelife の feat/mcp-control-api（GUI 側）と kagelife-mcp の feat/mcp-stdi
   場所: 環境変数 `KAGELIFE_CONTROL_FILE`、無ければ `filepath.Join(os.UserCacheDir(), "kagelife", "control.json")`。GUI 正常終了時に削除（token が自分のものと一致するときだけ。補足 13）。`version` は 1 固定で、クライアントは 1 以外を受け付けない（補足 15）
 - 認証: 全リクエストに `Authorization: Bearer <token>`。不一致・欠落は 401 `unauthorized`
 - 形式: リクエスト・レスポンスとも `application/json`
+- 要求本文の JSON に契約に無いフィールドがあれば 400 `invalid_request`（message にフィールド名。補足 19）。応答の側は後からフィールドが増えうるので、クライアントは知らないフィールドを無視する
+- 任意機能の有無は `GET /v1/state` の `features` で示す。`version` は上げない（補足 20）
 - エラー共通形: `{"error":"<code>","message":"<人間/LLM 向けの説明>"}`（`compile_error` のみ `diagnostics` を追加）
 - ゲームループが 2 秒以内に応答しなければ 503 `loop_timeout`
 - 未定義パスは 404 `not_found`、メソッド違いは 405 `method_not_allowed`
@@ -68,11 +70,12 @@ kagelife の feat/mcp-control-api（GUI 側）と kagelife-mcp の feat/mcp-stdi
 {"active":"01_uv","shaders":["01_uv","02_time_sin"],"bpm":120.0,"bpm_measured":false,
  "fade":{"fading":false,"target":"","mix":0.0,"beats":4.0},
  "fps":59.9,"resolution":[1280,720],
- "last_error":null}
+ "last_error":null,"features":[]}
 ```
 `last_error` は `{"shader":"x","message":"..."}` または null（ファイル監視経由のコンパイル失敗も含む最新のもの。寿命は補足 8、`message` の形は経路で異なる: 補足 18）。`active` はシェーダ 0 本なら `""`。
 `shaders` はファイル名順で、コンパイルに失敗したファイルも含む（補足 16）。
 `bpm` は常に 40〜300 で、0（未設定）にはならない。タップ前は既定の 120（[ADR-008](ADR-008-crossfade-compositing.md) D3）。`bpm_measured` は、`bpm` が既定値のままなら false、タップまたは `POST /v1/bpm` で設定された値なら true（`tempo.Tapper.Measured()` に当たる）。
+`features` は常に配列で、GUI が持つ任意機能の snake_case の名前を並べる。v1 の時点では空配列（補足 20）。
 
 #### GET /v1/shaders/{name}
 200 `{"name":"x","source":"..."}` / 404 `not_found`
@@ -119,7 +122,7 @@ body `{"bpm":128}` → 40〜300 以外は 400 `invalid_bpm`。200 `{"bpm":128.0}
 
 | HTTP | error | 発生条件 |
 |------|-------|---------|
-| 400 | `invalid_request` | JSON 本文が不正、または必須項目が欠けている |
+| 400 | `invalid_request` | JSON 本文が不正、必須項目が欠けている、または契約に無いフィールドがある（message にフィールド名。補足 19） |
 | 400 | `invalid_name` | シェーダ名が正規表現に合わない（GET・PUT・switch・crossfade。エスケープはデコードしてから検査） |
 | 400 | `invalid_beats` | beats が 0 以下または 64 超 |
 | 400 | `invalid_bpm` | bpm が 40〜300 の外 |
@@ -168,6 +171,14 @@ feat/mcp-control-api の実装で確定した補足。本節と実装が食い�
     - ファイル監視経由のコンパイル失敗: `shadermgr.CompileError` の形。各行が `<絶対パス>:<行>:<列>: <メッセージ>`、行・列の形に合わない行は `<絶対パス>: <メッセージ>` で、複数あれば改行区切り。行番号は Ebitengine が返したままで、diagnostics のようにソースの行の範囲内へ絞らない
     - ファイル監視経由の読み込み失敗（ファイルを読めない）: OS のエラー文（パスを含む）。補足 8 の「コンパイル失敗」に加えて、これも `last_error` を上書きする
     - PUT のコンパイル失敗: 422 の `message` と同じ diagnostics の要約。`shader compilation failed: <先頭の診断>` で、先頭の診断は `<行>:<列>: <メッセージ>`（位置不明ならメッセージのみ）、2 件以上なら末尾に ` (and <残りの件数> more)` が付く。パスは含まない
+
+### 補足（2026-10-22 追加）
+
+2026-10-19 の決定（PRD v0.5 FR-140・FR-141）。段階 3 の拡張（PRD §12 の A〜D）は既存の要求にフィールドを足していく（例: switch / crossfade の `at`）。
+古い GUI が知らないフィールドを黙って無視すると、量子化を頼んだ操作が即時に実行されるといった食い違いが表に出ない。これを #24 のマージ前に塞ぐ。番号は補足 1〜18 から続ける。
+
+19. **未知のフィールドの拒否**: 要求本文の JSON（PUT /v1/shaders/{name}、POST /v1/switch、POST /v1/crossfade、POST /v1/bpm と、今後足すエンドポイントのすべて）に、そのエンドポイントの契約に無いフィールドがあれば 400 `invalid_request` を返す。message には未知のフィールドの名前を入れる（例: `unknown field "at"`）。検査の順では JSON の解析の一部として、名前・beats・bpm などの値の検査より先に行う。応答の側はこの限りでない: GUI は応答にフィールドを足すことがあるので、クライアント（`kagelife-mcp`・指揮役）は応答の知らないフィールドを無視する
+20. **`features`**: `GET /v1/state` に `features` を出す。常に配列で、null にも省略にもしない。要素は GUI が持つ任意機能の snake_case の名前（`^[a-z][a-z0-9_]*$`）で、並びは名前順。v1 の時点では空配列。任意機能を足す PR（PRD §12 の A〜D）は、その機能の名前を足し、本 ADR に名前と中身を書く（名前の一覧の置き場所は PRD Q-016）。クライアントは任意機能を使う前に `features` で有無を確かめ、無ければ GUI の版が古いことを `isError` で返す。発見ファイルの `version` は 1 のまま上げない。`version` は既存の要求・応答の意味が変わる非互換な変更のためにとっておき、機能の追加は `features` で示す
 
 ---
 
@@ -278,4 +289,6 @@ sequenceDiagram
 - [ ] 発見ファイルが 0600 で書かれ、正常終了時に消えることをテストする（token が一致しないときは消さないことも）
 - [ ] 補足 1〜15 をそれぞれテストで固定する（feat/mcp-control-api）
 - [ ] 補足 14 の改訂と補足 16〜18 をテストで固定する（PR #24 の `internal/control` と `internal/shadermgr` のテスト）
+- [ ] 補足 19・20 を #24 のマージ前に実装し、テストで固定する（各エンドポイントで未知のフィールドが 400 `invalid_request` になり message にフィールド名が入ること、`features` が空配列で出ること）
+- [ ] kagelife-mcp #1 を補足 19・20 に追従させる（要求に余計なフィールドを送らない、応答の知らないフィールドを無視する）
 - [ ] 仕様の確認: 全ファイルがコンパイルに失敗した状態で `active` に switch できない nil のスロットの名前が入る（補足 16）。`active` を null にするか決める
