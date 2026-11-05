@@ -137,6 +137,7 @@ type Config struct {
 	Compile       shadermgr.ShaderCompiler
 	Queue         *Queue
 	Timeout       time.Duration // 0 なら DefaultTimeout
+	LLMSlots      []string      // -llm-slots の予約名（nil なら無効）。ServerConfig.LLMSlots を参照
 }
 
 // Controller は起動中の制御口。
@@ -177,6 +178,7 @@ func Start(cfg Config) (*Controller, error) {
 				Compile:   cfg.Compile,
 				Queue:     cfg.Queue,
 				Timeout:   cfg.Timeout,
+				LLMSlots:  cfg.LLMSlots,
 			}),
 			ReadHeaderTimeout: 5 * time.Second,
 		},

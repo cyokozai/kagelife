@@ -69,6 +69,10 @@ type Game struct {
 	// offscreen はクロスフェードの B 側を描く画面外の画像。画面サイズが変わったときだけ作り直す。
 	offscreen *ebiten.Image
 
+	// llmSlots は -llm-slots の予約名（nil なら無効）。キー 8・9 に割り当て、キー 0 で予約名以外へ戻る。
+	llmSlots []string
+	back     backKey
+
 	eng   *control.Engine // 制御口から名前で操作する VJ 状態（sm と tapper を共有）
 	queue *control.Queue  // 制御口からの処理。Update で毎 tick 読み切る
 	quit  atomic.Bool     // シグナル受信で立て、次の Update で終了する
@@ -81,7 +85,8 @@ func ebitenCompiler(src []byte) (shadermgr.Shader, error) {
 }
 
 // NewGame は shaderDir（絶対パス）のシェーダーを読み込んだ Game を作る。
-func NewGame(shaderDir string, queue *control.Queue) (*Game, error) {
+// llmSlots は検査済みの -llm-slots の予約名（nil なら無効）。
+func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, error) {
 	g := &Game{
 		sm:       shadermgr.New(ebitenCompiler),
 		tapper:   tempo.New(2*time.Second, 8),
@@ -92,12 +97,14 @@ func NewGame(shaderDir string, queue *control.Queue) (*Game, error) {
 		uniforms: uniform.New(),
 		title:    titleSetter{set: ebiten.SetWindowTitle},
 		queue:    queue,
+		llmSlots: llmSlots,
 	}
 	g.eng = &control.Engine{
 		SM:        g.sm,
 		Tapper:    g.tapper,
 		ShaderDir: shaderDir,
 		FPS:       ebiten.ActualFPS,
+		LLMSlots:  llmSlots,
 	}
 
 	w, err := filewatcher.New(shaderDir)
@@ -120,7 +127,7 @@ func NewGame(shaderDir string, queue *control.Queue) (*Game, error) {
 		}
 	}
 
-	logShaderList(g.sm.Names())
+	logShaderList(g.sm.Names(), g.llmSlots)
 
 	return g, nil
 }
@@ -221,12 +228,16 @@ func errorLines(errs map[string]error, limit int) []string {
 
 // hudText は HUD に描く文字列を組み立てる。
 // measured が false（タップも set_bpm もしていない既定値）なら、BPM に (default) を付ける。
-func hudText(bpm float64, measured bool, fadeBeats, mix float32, errs map[string]error) string {
+// llmSlots が有ればキー 8・9 の行を状態行の次に出す。
+func hudText(bpm float64, measured bool, fadeBeats, mix float32, errs map[string]error, llmSlots []string) string {
 	bpmText := fmt.Sprintf("%.1f", bpm)
 	if !measured {
 		bpmText += " (default)"
 	}
 	lines := []string{fmt.Sprintf("BPM: %s  FadeBeats: %.1f  Mix: %.2f", bpmText, fadeBeats, mix)}
+	if line := llmHUDLine(llmSlots); line != "" {
+		lines = append(lines, line)
+	}
 	lines = append(lines, errorLines(errs, hudMaxErrors)...)
 
 	return strings.Join(lines, "\n")
@@ -283,15 +294,26 @@ type options struct {
 	shaderDir   string
 	controlAddr string
 	version     bool
+	// llmSlots は検査済みの -llm-slots の予約名（nil なら無効）。
+	llmSlots []string
 }
 
 // parseFlags は args（プログラム名を除く）を解釈する。
+// -llm-slots の値は control.ParseLLMSlots で検査し、違反なら（FlagSet がエラーと使い方を出して）起動エラーにする。
 func parseFlags(args []string) (options, error) {
 	var opts options
 	fs := flag.NewFlagSet("kagelife", flag.ContinueOnError)
 	fs.StringVar(&opts.shaderDir, "shaders", "shaders", "シェーダー（*.kage）を置くディレクトリ")
 	fs.StringVar(&opts.controlAddr, "control-addr", "127.0.0.1:0", "制御口の待受アドレス（ループバックのみ。ポート 0 は空きポート）")
 	fs.BoolVar(&opts.version, "version", false, "バージョンを出力して終了する")
+	fs.Func("llm-slots",
+		"LLM が書き込む予約名（カンマ区切りで 1〜2 個。例: llm_a,llm_b）。1 個目がキー 8、2 個目がキー 9。既定は無効",
+		func(s string) error {
+			slots, err := control.ParseLLMSlots(s)
+			opts.llmSlots = slots
+
+			return err
+		})
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -299,18 +321,40 @@ func parseFlags(args []string) (options, error) {
 	return opts, nil
 }
 
-// shaderListLines はシェーダーの一覧を、キーの 1〜9 と揃えた 1 始まりの番号で組み立てる。
-func shaderListLines(names []string) []string {
-	lines := make([]string, len(names))
-	for i, name := range names {
-		lines[i] = fmt.Sprintf("shader %d: %s", i+1, name)
+// shaderListLines はシェーダーの一覧を、キーと揃えた 1 始まりの番号で組み立てる。
+// llmSlots が無ければファイル名順に 1, 2, ... と振る（1〜9 がキー）。
+// 有れば予約名以外に 1〜7 を振り（8 本目以降はキー無し）、最後に予約名を 8・9 として出す。
+func shaderListLines(names []string, llmSlots []string) []string {
+	lines := make([]string, 0, len(names)+len(llmSlots))
+	if len(llmSlots) == 0 {
+		for i, name := range names {
+			lines = append(lines, fmt.Sprintf("shader %d: %s", i+1, name))
+		}
+
+		return lines
+	}
+
+	k := 0
+	for _, name := range names {
+		if isReserved(name, llmSlots) {
+			continue
+		}
+		if k < plainKeys {
+			k++
+			lines = append(lines, fmt.Sprintf("shader %d: %s", k, name))
+		} else {
+			lines = append(lines, fmt.Sprintf("shader -: %s (no key)", name))
+		}
+	}
+	for _, label := range llmKeyLabels(llmSlots) {
+		lines = append(lines, "shader "+label)
 	}
 
 	return lines
 }
 
-func logShaderList(names []string) {
-	for _, line := range shaderListLines(names) {
+func logShaderList(names []string, llmSlots []string) {
+	for _, line := range shaderListLines(names, llmSlots) {
 		log.Print(line)
 	}
 }
@@ -326,31 +370,20 @@ func (g *Game) Update() error {
 		// reload を Engine 経由にして、HUD の errs と制御口の last_error の両方を更新する。
 		processEvents(paths, g.readShader, g.eng.ReloadFile, g.errs)
 		if g.sm.Len() > before {
-			logShaderList(g.sm.Names())
+			logShaderList(g.sm.Names(), g.llmSlots)
 		}
 	}
 
 	// 削除も Engine 経由にして、スロット・HUD の errs・制御口の last_error を揃えて消す。
 	if paths := drainEvents(g.watcher.Removed, maxEventsPerFrame); len(paths) > 0 {
 		processRemoved(paths, g.eng.RemoveFile, g.errs)
-		logShaderList(g.sm.Names())
+		logShaderList(g.sm.Names(), g.llmSlots)
 	}
 
 	// 制御口からの処理（状態の読み取り・切替・差し替え）はここでだけ実行する
 	g.queue.Drain(g.eng)
 
-	shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) ||
-		ebiten.IsKeyPressed(ebiten.KeyShiftRight)
-
-	for i := 0; i < g.sm.Len() && i < 9; i++ {
-		if inpututil.IsKeyJustPressed(ebiten.Key1 + ebiten.Key(i)) {
-			if shift {
-				g.sm.BeginFade(i)
-			} else {
-				g.sm.Switch(i)
-			}
-		}
-	}
+	g.handleSlotKeys()
 
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		g.tapper.Tap(time.Now())
@@ -381,6 +414,36 @@ func (g *Game) Update() error {
 	g.frame++
 
 	return nil
+}
+
+// handleSlotKeys は数字キーでシェーダーを切り替える。数字は即時切替、Shift＋数字はクロスフェード。
+// -llm-slots 有りのときは 8・9 が予約名、0 が直前に映っていた予約名以外のシェーダーへの即時切替。
+func (g *Game) handleSlotKeys() {
+	paths := g.sm.Names()
+	if len(g.llmSlots) > 0 {
+		// キーを処理する前に記録するので、予約名へ切り替えた直後も切替前のシェーダーが残る
+		g.back.observe(paths, g.llmSlots, g.sm.ActiveIndex(), g.sm.Fading(), g.sm.FadeTargetIndex())
+	}
+
+	shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) ||
+		ebiten.IsKeyPressed(ebiten.KeyShiftRight)
+
+	for k, idx := range keySlots(paths, g.llmSlots) {
+		if idx < 0 || !inpututil.IsKeyJustPressed(ebiten.Key1+ebiten.Key(k)) {
+			continue
+		}
+		if shift {
+			g.sm.BeginFade(idx)
+		} else {
+			g.sm.Switch(idx)
+		}
+	}
+
+	if len(g.llmSlots) > 0 && inpututil.IsKeyJustPressed(ebiten.Key0) {
+		if i := g.back.target(paths, g.llmSlots, g.sm.Usable); i >= 0 {
+			g.sm.Switch(i)
+		}
+	}
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
@@ -453,7 +516,7 @@ func (g *Game) offscreenFor(w, h int) *ebiten.Image {
 // 文字サイズと位置はデバイスの拡大率に合わせる。
 func (g *Game) drawHUD(screen *ebiten.Image) {
 	s := ebiten.Monitor().DeviceScaleFactor()
-	msg := hudText(g.tapper.BPM(), g.tapper.Measured(), g.sm.FadeBeats(), g.sm.MixRatio(), g.errs)
+	msg := hudText(g.tapper.BPM(), g.tapper.Measured(), g.sm.FadeBeats(), g.sm.MixRatio(), g.errs, g.llmSlots)
 	face := &text.GoTextFace{Source: hudFaceSource, Size: g.hudSize * s}
 	// text/v2 は LineSpacing が 0 だと改行しても行が重なるので、複数行のエラーに備えて指定する。
 	lineSpacing := face.Size * 1.2
@@ -510,20 +573,34 @@ func main() {
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowTitle(appName)
 
-	if err := run(opts.shaderDir, opts.controlAddr); err != nil {
+	if err := run(opts.shaderDir, opts.controlAddr, opts.llmSlots); err != nil {
 		log.Fatal(err)
 	}
 }
 
+// logLLMSlots は -llm-slots の設定を起動ログに出す。
+func logLLMSlots(llmSlots []string) {
+	if len(llmSlots) == 0 {
+		return
+	}
+	log.Printf("llm-slots: %s (PUT is limited to these names; key 0 returns to the last non-LLM shader)",
+		strings.Join(llmKeyLabels(llmSlots), ", "))
+	if len(llmSlots) < control.MaxLLMSlots {
+		log.Print("llm-slots: 2 names are recommended (the LLM writes the slot that is off screen while the other is live)")
+	}
+}
+
 // run は制御口を起動してからゲームを回し、終了時に制御口を閉じて発見ファイルを消す。
-func run(shaderDirArg, controlAddr string) error {
+func run(shaderDirArg, controlAddr string, llmSlots []string) error {
 	shaderDir, err := filepath.Abs(shaderDirArg)
 	if err != nil {
 		return fmt.Errorf("shader dir: %w", err)
 	}
 
+	logLLMSlots(llmSlots)
+
 	queue := control.NewQueue(64)
-	g, err := NewGame(shaderDir, queue)
+	g, err := NewGame(shaderDir, queue, llmSlots)
 	if err != nil {
 		return err
 	}
@@ -534,6 +611,7 @@ func run(shaderDirArg, controlAddr string) error {
 		ShaderDir: shaderDir,
 		Compile:   ebitenCompiler,
 		Queue:     queue,
+		LLMSlots:  llmSlots,
 	})
 	if err != nil {
 		return err
