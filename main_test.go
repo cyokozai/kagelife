@@ -150,7 +150,7 @@ func TestErrorLines(t *testing.T) {
 func TestHUDText(t *testing.T) {
 	t.Run("状態行のあとにエラー行が続く", func(t *testing.T) {
 		errs := map[string]error{"a.kage": errors.New("boom")}
-		got := hudText(120, true, 4, 0.25, errs, nil)
+		got := hudText(hudState{BPM: 120, Measured: true, FadeBeats: 4, Mix: 0.25, Errs: errs})
 		want := "BPM: 120.0  FadeBeats: 4.0  Mix: 0.25\nERROR: boom"
 		if got != want {
 			t.Fatalf("got %q, want %q", got, want)
@@ -158,14 +158,14 @@ func TestHUDText(t *testing.T) {
 	})
 
 	t.Run("エラーが無ければ状態行だけ", func(t *testing.T) {
-		got := hudText(0, true, 0.5, 0, nil, nil)
+		got := hudText(hudState{BPM: 0, Measured: true, FadeBeats: 0.5})
 		if strings.Contains(got, "\n") {
 			t.Fatalf("got %q", got)
 		}
 	})
 
 	t.Run("タップ前の既定 BPM には (default) を付ける", func(t *testing.T) {
-		got := hudText(120, false, 4, 0, nil, nil)
+		got := hudText(hudState{BPM: 120, FadeBeats: 4})
 		want := "BPM: 120.0 (default)  FadeBeats: 4.0  Mix: 0.00"
 		if got != want {
 			t.Fatalf("got %q, want %q", got, want)
