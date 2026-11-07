@@ -98,6 +98,12 @@ func ebitenCompiler(src []byte) (shadermgr.Shader, error) {
 	return ebiten.NewShader(src)
 }
 
+// NewGame が使う監視とディレクトリの読み取り。テストで失敗を起こすために差し替える。
+var (
+	newShaderWatcher = filewatcher.New
+	readShaderDir    = os.ReadDir
+)
+
 // NewGame は shaderDir（絶対パス）のシェーダーを読み込んだ Game を作る。
 // llmSlots は検査済みの -llm-slots の予約名（nil なら無効）。
 func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, error) {
@@ -126,14 +132,16 @@ func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, 
 		LLMSlots:  llmSlots,
 	}
 
-	w, err := filewatcher.New(shaderDir)
+	w, err := newShaderWatcher(shaderDir)
 	if err != nil {
 		return nil, err
 	}
 	g.watcher = w
 
-	entries, err := os.ReadDir(shaderDir)
+	entries, err := readShaderDir(shaderDir)
 	if err != nil {
+		w.Close() // 監視の goroutine を残さない
+
 		return nil, err
 	}
 	for _, e := range entries {
