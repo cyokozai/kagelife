@@ -80,6 +80,9 @@ type Game struct {
 
 	// avOffset は -av-offset。映像の拍（Beat）だけを、この分だけ遅らせる（FR-156 の最小版）。
 	avOffset time.Duration
+
+	// cursor は全画面のあいだカーソルを隠す。
+	cursor cursorSync
 }
 
 var hudFaceSource *text.GoTextFaceSource
@@ -100,6 +103,7 @@ func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, 
 		errs:     map[string]error{},
 		uniforms: uniform.New(),
 		title:    titleSetter{set: ebiten.SetWindowTitle},
+		cursor:   cursorSync{set: setEbitenCursorHidden},
 		queue:    queue,
 		llmSlots: llmSlots,
 	}
@@ -315,6 +319,12 @@ type options struct {
 	llmSlots []string
 	// avOffset は -av-offset（映像の拍を遅らせる時間）。
 	avOffset time.Duration
+	// display は -display（1 始まり。0 は指定なし）。
+	display int
+	// listDisplays は -list-displays（ディスプレイの一覧を出して終了する）。
+	listDisplays bool
+	// fullscreen は -fullscreen（起動時から全画面）。
+	fullscreen bool
 }
 
 // parseFlags は args（プログラム名を除く）を解釈する。エラーと使い方は標準エラーに出す。
@@ -347,6 +357,16 @@ func parseFlagsTo(args []string, out io.Writer) (options, error) {
 
 			return err
 		})
+	fs.Func("display",
+		"全画面を出すディスプレイの番号（1 始まり。-list-displays の番号）。既定は指定なし",
+		func(s string) error {
+			n, err := parseDisplay(s)
+			opts.display = n
+
+			return err
+		})
+	fs.BoolVar(&opts.listDisplays, "list-displays", false, "ディスプレイの番号・名前・大きさを出力して終了する")
+	fs.BoolVar(&opts.fullscreen, "fullscreen", false, "起動時から全画面にする（全画面のあいだはカーソルを隠す）")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -439,6 +459,7 @@ func (g *Game) Update() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyF) {
 		ebiten.SetFullscreen(!ebiten.IsFullscreen())
 	}
+	g.cursor.update(ebiten.IsFullscreen())
 
 	g.cursorX, g.cursorY = ebiten.CursorPosition()
 
@@ -610,9 +631,22 @@ func main() {
 		return
 	}
 
+	// -list-displays もウィンドウを開かずに終わる（AppendMonitors は RunGame の前に GLFW を初期化して一覧を返す）
+	displays := &ebitenDisplays{}
+	if opts.listDisplays {
+		printDisplays(displays, os.Stdout)
+
+		return
+	}
+
 	ebiten.SetWindowSize(screenWidth, screenHeight)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowTitle(appName)
+
+	if err := setupDisplay(opts, displays, os.Stderr); err != nil {
+		log.Print(err)
+		os.Exit(2)
+	}
 
 	if err := run(opts); err != nil {
 		log.Fatal(err)
