@@ -83,6 +83,13 @@ type Game struct {
 
 	// cursor は全画面のあいだカーソルを隠す。
 	cursor cursorSync
+
+	// renderScale は -render-scale。1 未満なら render に縮めて描き、拡大して画面に出す。
+	renderScale float64
+	render      *ebiten.Image
+	// frames は直近 5 秒のフレーム時間。fps は actualFPS（テストでは差し替え）で読む。
+	frames    *frameStats
+	actualFPS func() float64
 }
 
 var hudFaceSource *text.GoTextFaceSource
@@ -104,8 +111,12 @@ func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, 
 		uniforms: uniform.New(),
 		title:    titleSetter{set: ebiten.SetWindowTitle},
 		cursor:   cursorSync{set: setEbitenCursorHidden},
-		queue:    queue,
-		llmSlots: llmSlots,
+
+		renderScale: maxRenderScale,
+		frames:      newFrameStats(frameStatsWindow),
+		actualFPS:   ebiten.ActualFPS,
+		queue:       queue,
+		llmSlots:    llmSlots,
 	}
 	g.eng = &control.Engine{
 		SM:        g.sm,
@@ -241,6 +252,7 @@ type hudState struct {
 	FadeBeats float32
 	Mix       float32
 	AVOffset  time.Duration // 0 なら出さない
+	Perf      *perfState    // 有れば状態行の次に fps とフレーム時間の最大値の行を出す
 	Errs      map[string]error
 	LLMSlots  []string // 有ればキー 8・9 の行を状態行の次に出す
 }
@@ -256,6 +268,9 @@ func hudText(st hudState) string {
 		status += fmt.Sprintf("  AV offset: %dms", st.AVOffset.Milliseconds())
 	}
 	lines := []string{status}
+	if st.Perf != nil {
+		lines = append(lines, perfLine(*st.Perf))
+	}
 	if line := llmHUDLine(st.LLMSlots); line != "" {
 		lines = append(lines, line)
 	}
@@ -325,6 +340,8 @@ type options struct {
 	listDisplays bool
 	// fullscreen は -fullscreen（起動時から全画面）。
 	fullscreen bool
+	// renderScale は -render-scale（シェーダーを描く解像度の倍率。1.0 は画面のまま）。
+	renderScale float64
 }
 
 // parseFlags は args（プログラム名を除く）を解釈する。エラーと使い方は標準エラーに出す。
@@ -335,7 +352,7 @@ func parseFlags(args []string) (options, error) {
 // parseFlagsTo は args を解釈し、エラーと使い方を out に出す。
 // -llm-slots の値は control.ParseLLMSlots で検査し、違反なら（FlagSet がエラーと使い方を出して）起動エラーにする。
 func parseFlagsTo(args []string, out io.Writer) (options, error) {
-	var opts options
+	opts := options{renderScale: maxRenderScale}
 	fs := flag.NewFlagSet("kagelife", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.StringVar(&opts.shaderDir, "shaders", "shaders", "シェーダー（*.kage）を置くディレクトリ")
@@ -367,6 +384,14 @@ func parseFlagsTo(args []string, out io.Writer) (options, error) {
 		})
 	fs.BoolVar(&opts.listDisplays, "list-displays", false, "ディスプレイの番号・名前・大きさを出力して終了する")
 	fs.BoolVar(&opts.fullscreen, "fullscreen", false, "起動時から全画面にする（全画面のあいだはカーソルを隠す）")
+	fs.Func("render-scale",
+		"シェーダーを描く解像度の倍率（0.25〜1.0、既定 1.0）。1.0 未満なら縮めて描き、拡大して出す",
+		func(s string) error {
+			v, err := parseRenderScale(s)
+			opts.renderScale = v
+
+			return err
+		})
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -501,6 +526,8 @@ func (g *Game) handleSlotKeys() {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	g.frames.observe(time.Now())
+
 	if shader, ok := g.sm.Active().(*ebiten.Shader); ok && shader != nil {
 		g.drawShaders(screen, shader)
 	}
@@ -511,59 +538,77 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 // drawShaders はアクティブなシェーダー A を描き、フェード中なら B を画面外に描いてから重ねる。
-// 画面は既定で毎フレーム消去されるので、ここでは Clear しない。
+// -render-scale が 1 未満なら、A と B を画面 × S の画面外の画像に描き、線形補間で拡大して画面に出す。
+// 画面は既定で毎フレーム消去されるので、画面そのものに描くときは Clear しない。
 func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) {
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+	sw, sh := screen.Bounds().Dx(), screen.Bounds().Dy()
 
-	g.eng.Resolution = [2]int{w, h}
+	// 制御口の state の resolution は画面の大きさのまま（契約を変えない）
+	g.eng.Resolution = [2]int{sw, sh}
 	now := time.Now()
-	uniforms := g.uniforms.Build(uniform.Input{
-		Time:    float32(now.Sub(g.startAt).Seconds()),
-		Width:   w,
-		Height:  h,
-		Beat:    visualPhase(g.tapper, now, g.avOffset),
+	in := shaderInput(frameParams{
+		ScreenW: sw,
+		ScreenH: sh,
+		Scale:   g.renderScale,
 		CursorX: g.cursorX,
 		CursorY: g.cursorY,
+		Elapsed: now.Sub(g.startAt),
+		Beat:    visualPhase(g.tapper, now, g.avOffset),
 		Frame:   g.frame,
 		Random:  rand.Float32(),
 	})
+	uniforms := g.uniforms.Build(in)
+	w, h := in.Width, in.Height
+
+	target := screen
+	if g.renderScale < maxRenderScale {
+		g.render = resizedImage(g.render, w, h)
+		target = g.render
+		target.Clear()
+	}
 
 	opA := &ebiten.DrawRectShaderOptions{Uniforms: uniforms}
-	screen.DrawRectShader(w, h, shader, opA)
+	target.DrawRectShader(w, h, shader, opA)
 
-	if !g.sm.Fading() {
-		return
+	if shaderB, ok := g.sm.ActiveB().(*ebiten.Shader); g.sm.Fading() && ok && shaderB != nil {
+		// DrawRectShaderOptions.ColorScale はシェーダーの color 引数に渡るだけで、
+		// color を使わないシェーダーでは効かない。B を画面外に描き、DrawImage の ColorScale で薄めて重ねる。
+		// ScaleAlpha は RGBA の 4 成分に掛かるので、乗算済みアルファのまま正しく補間される。
+		off := g.offscreenFor(w, h)
+		off.Clear()
+		opB := &ebiten.DrawRectShaderOptions{Uniforms: uniforms}
+		off.DrawRectShader(w, h, shaderB, opB)
+
+		opMix := &ebiten.DrawImageOptions{}
+		opMix.ColorScale.ScaleAlpha(g.sm.MixRatio())
+		target.DrawImage(off, opMix)
 	}
-	shaderB, ok := g.sm.ActiveB().(*ebiten.Shader)
-	if !ok || shaderB == nil {
-		return
+
+	if target != screen {
+		op := &ebiten.DrawImageOptions{Filter: ebiten.FilterLinear}
+		op.GeoM.Scale(float64(sw)/float64(w), float64(sh)/float64(h))
+		screen.DrawImage(target, op)
 	}
-
-	// DrawRectShaderOptions.ColorScale はシェーダーの color 引数に渡るだけで、
-	// color を使わないシェーダーでは効かない。B を画面外に描き、DrawImage の ColorScale で薄めて重ねる。
-	// ScaleAlpha は RGBA の 4 成分に掛かるので、乗算済みアルファのまま正しく補間される。
-	off := g.offscreenFor(w, h)
-	off.Clear()
-	opB := &ebiten.DrawRectShaderOptions{Uniforms: uniforms}
-	off.DrawRectShader(w, h, shaderB, opB)
-
-	opMix := &ebiten.DrawImageOptions{}
-	opMix.ColorScale.ScaleAlpha(g.sm.MixRatio())
-	screen.DrawImage(off, opMix)
 }
 
-// offscreenFor は w x h の画面外の画像を返す。サイズが変わったときだけ作り直し、古いものは解放する。
+// offscreenFor は w x h の画面外の画像（クロスフェードの B 側）を返す。
 func (g *Game) offscreenFor(w, h int) *ebiten.Image {
-	if g.offscreen != nil {
-		b := g.offscreen.Bounds()
-		if b.Dx() == w && b.Dy() == h {
-			return g.offscreen
-		}
-		g.offscreen.Deallocate()
-	}
-	g.offscreen = ebiten.NewImage(w, h)
+	g.offscreen = resizedImage(g.offscreen, w, h)
 
 	return g.offscreen
+}
+
+// resizedImage は img が w x h ならそのまま返し、違えば解放して作り直す。
+func resizedImage(img *ebiten.Image, w, h int) *ebiten.Image {
+	if img != nil {
+		b := img.Bounds()
+		if b.Dx() == w && b.Dy() == h {
+			return img
+		}
+		img.Deallocate()
+	}
+
+	return ebiten.NewImage(w, h)
 }
 
 // drawHUD は状態とエラーを左上に描く。LayoutF がデバイスピクセルの論理画面を返すため、
@@ -576,8 +621,13 @@ func (g *Game) drawHUD(screen *ebiten.Image) {
 		FadeBeats: g.sm.FadeBeats(),
 		Mix:       g.sm.MixRatio(),
 		AVOffset:  g.avOffset,
-		Errs:      g.errs,
-		LLMSlots:  g.llmSlots,
+		Perf: &perfState{
+			FPS:         g.actualFPS(),
+			FrameMax:    g.frames.max(time.Now()),
+			RenderScale: g.renderScale,
+		},
+		Errs:     g.errs,
+		LLMSlots: g.llmSlots,
 	})
 	face := &text.GoTextFace{Source: hudFaceSource, Size: g.hudSize * s}
 	// text/v2 は LineSpacing が 0 だと改行しても行が重なるので、複数行のエラーに備えて指定する。
@@ -682,6 +732,10 @@ func run(opts options) error {
 	}
 	defer g.watcher.Close()
 	g.avOffset = opts.avOffset
+	g.renderScale = opts.renderScale
+	if g.renderScale < maxRenderScale {
+		log.Printf("render-scale: %.2f (shaders are drawn at the reduced size and upscaled)", g.renderScale)
+	}
 	if g.avOffset != 0 {
 		log.Printf("av-offset: %dms (Beat only)", g.avOffset.Milliseconds())
 	}
