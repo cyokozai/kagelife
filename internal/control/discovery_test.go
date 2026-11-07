@@ -161,6 +161,32 @@ func TestRemoveDiscovery_KeepsFileReplacedAfterCheck(t *testing.T) {
 	}
 }
 
+// 親ディレクトリごと無いときは何もせず、ディレクトリも作らない。
+func TestRemoveDiscovery_MissingDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nope")
+	if err := RemoveDiscovery(filepath.Join(dir, "control.json"), "x"); err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Error("無かったディレクトリが作られた")
+	}
+}
+
+// ロックファイルは 0600 で、発見ファイルの隣に置く。
+func TestWriteDiscovery_LockFile0600(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "control.json")
+	if err := WriteDiscovery(path, Discovery{Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(path + ".lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := st.Mode().Perm(); perm != 0o600 {
+		t.Errorf("perm = %o, want 600", perm)
+	}
+}
+
 func TestListenLoopback(t *testing.T) {
 	for _, addr := range []string{"127.0.0.1:0", "[::1]:0"} {
 		ln, err := ListenLoopback(addr)
