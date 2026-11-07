@@ -84,7 +84,7 @@ Refactor → コードをきれいにする（テストは常にグリーン）
 - [x] `.github/workflows/release.yml`（実際の Actions では未実行。cgo=1 のネイティブビルド、[ADR-003](adr/ADR-003-cross-platform.md) / [ADR-004](adr/ADR-004-cicd-release.md)）
 - [x] `.github/release.yml`（リリースノート分類）
 - [x] Makefile の package / checksum、Ebitengine のビルド依存をまとめた composite action（setup-ebiten）
-- [ ] LICENSE ファイルの追加（配布物に同梱する）
+- [x] LICENSE ファイルの追加（MIT。#28 で追加。Makefile の package で配布物に同梱する）
 - [ ] 性能の実測（起動〜最初の描画 < 2秒、長時間実行でのメモリ）
 - [ ] `v1.0.0`タグを打ってGitHub Releaseを確認
 
