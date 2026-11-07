@@ -94,6 +94,10 @@ func WriteDiscovery(path string, d Discovery) (err error) {
 	return os.Rename(tmp.Name(), path)
 }
 
+// testHookBeforeRemove はテスト用の差し込み口。RemoveDiscovery が token を確かめた後、
+// 削除する前に呼ばれる。本番では nil のまま。
+var testHookBeforeRemove func()
+
 // RemoveDiscovery は path の発見ファイルが token のものであれば削除する。
 // 別のプロセスが上書きした発見ファイルは消さない。ファイルが無ければ何もしない。
 func RemoveDiscovery(path, token string) error {
@@ -107,6 +111,9 @@ func RemoveDiscovery(path, token string) error {
 	var d Discovery
 	if json.Unmarshal(b, &d) != nil || d.Token != token {
 		return nil
+	}
+	if testHookBeforeRemove != nil {
+		testHookBeforeRemove()
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
