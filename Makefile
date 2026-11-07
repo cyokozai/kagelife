@@ -56,24 +56,29 @@ clean: ## ビルド成果物を削除する
 #   - darwin/amd64 は arm64 の macOS から GOARCH=amd64 でクロスビルドできる
 #   - linux/arm64 は arm64 の Linux 上でネイティブにビルドする
 # CI (release.yml) では OS/アーキ別のランナーでこれらを呼ぶ。
+# go build -o は出力先のディレクトリを作るが、それに頼らず各ターゲットで $(OUT_DIR) を作る。
 
 .PHONY: build-darwin-arm64
 build-darwin-arm64: ## [macOS CI用] darwin/arm64 バイナリをビルド
+	@mkdir -p $(OUT_DIR)
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=$(CGO_ENABLED) \
 		go build -ldflags "$(LDFLAGS)" -o $(OUT_DIR)/$(BINARY)-darwin-arm64 .
 
 .PHONY: build-darwin-amd64
 build-darwin-amd64: ## [macOS CI用] darwin/amd64 バイナリをビルド
+	@mkdir -p $(OUT_DIR)
 	GOOS=darwin GOARCH=amd64 CGO_ENABLED=$(CGO_ENABLED) \
 		go build -ldflags "$(LDFLAGS)" -o $(OUT_DIR)/$(BINARY)-darwin-amd64 .
 
 .PHONY: build-linux-amd64
 build-linux-amd64: ## [Linux CI用] linux/amd64 バイナリをビルド
+	@mkdir -p $(OUT_DIR)
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=$(CGO_ENABLED) \
 		go build -ldflags "$(LDFLAGS)" -o $(OUT_DIR)/$(BINARY)-linux-amd64 .
 
 .PHONY: build-linux-arm64
 build-linux-arm64: ## [Linux CI用] linux/arm64 バイナリをビルド
+	@mkdir -p $(OUT_DIR)
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=$(CGO_ENABLED) \
 		go build -ldflags "$(LDFLAGS)" -o $(OUT_DIR)/$(BINARY)-linux-arm64 .
 

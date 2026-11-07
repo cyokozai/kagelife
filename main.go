@@ -98,6 +98,12 @@ func ebitenCompiler(src []byte) (shadermgr.Shader, error) {
 	return ebiten.NewShader(src)
 }
 
+// NewGame が使う監視とディレクトリの読み取り。テストで失敗を起こすために差し替える。
+var (
+	newShaderWatcher = filewatcher.New
+	readShaderDir    = os.ReadDir
+)
+
 // NewGame は shaderDir（絶対パス）のシェーダーを読み込んだ Game を作る。
 // llmSlots は検査済みの -llm-slots の予約名（nil なら無効）。
 func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, error) {
@@ -126,14 +132,16 @@ func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, 
 		LLMSlots:  llmSlots,
 	}
 
-	w, err := filewatcher.New(shaderDir)
+	w, err := newShaderWatcher(shaderDir)
 	if err != nil {
 		return nil, err
 	}
 	g.watcher = w
 
-	entries, err := os.ReadDir(shaderDir)
+	entries, err := readShaderDir(shaderDir)
 	if err != nil {
+		w.Close() // 監視の goroutine を残さない
+
 		return nil, err
 	}
 	for _, e := range entries {
@@ -611,24 +619,29 @@ func resizedImage(img *ebiten.Image, w, h int) *ebiten.Image {
 	return ebiten.NewImage(w, h)
 }
 
-// drawHUD は状態とエラーを左上に描く。LayoutF がデバイスピクセルの論理画面を返すため、
-// 文字サイズと位置はデバイスの拡大率に合わせる。
-func (g *Game) drawHUD(screen *ebiten.Image) {
-	s := ebiten.Monitor().DeviceScaleFactor()
-	msg := hudText(hudState{
+// hudState は now の時点で HUD に出す値を集める。
+func (g *Game) hudState(now time.Time) hudState {
+	return hudState{
 		BPM:       g.tapper.BPM(),
 		Measured:  g.tapper.Measured(),
-		FadeBeats: g.sm.FadeBeats(),
+		FadeBeats: g.sm.CurrentFadeBeats(), // beats 指定のフェード中はその拍数（GET /v1/state の fade.beats と同じ）
 		Mix:       g.sm.MixRatio(),
 		AVOffset:  g.avOffset,
 		Perf: &perfState{
 			FPS:         g.actualFPS(),
-			FrameMax:    g.frames.max(time.Now()),
+			FrameMax:    g.frames.max(now),
 			RenderScale: g.renderScale,
 		},
 		Errs:     g.errs,
 		LLMSlots: g.llmSlots,
-	})
+	}
+}
+
+// drawHUD は状態とエラーを左上に描く。LayoutF がデバイスピクセルの論理画面を返すため、
+// 文字サイズと位置はデバイスの拡大率に合わせる。
+func (g *Game) drawHUD(screen *ebiten.Image) {
+	s := ebiten.Monitor().DeviceScaleFactor()
+	msg := hudText(g.hudState(time.Now()))
 	face := &text.GoTextFace{Source: hudFaceSource, Size: g.hudSize * s}
 	// text/v2 は LineSpacing が 0 だと改行しても行が重なるので、複数行のエラーに備えて指定する。
 	lineSpacing := face.Size * 1.2
