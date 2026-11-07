@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"image/color"
+	"io"
 	"log"
 	"math/rand/v2"
 	"os"
@@ -76,6 +77,9 @@ type Game struct {
 	eng   *control.Engine // 制御口から名前で操作する VJ 状態（sm と tapper を共有）
 	queue *control.Queue  // 制御口からの処理。Update で毎 tick 読み切る
 	quit  atomic.Bool     // シグナル受信で立て、次の Update で終了する
+
+	// avOffset は -av-offset。映像の拍（Beat）だけを、この分だけ遅らせる（FR-156 の最小版）。
+	avOffset time.Duration
 }
 
 var hudFaceSource *text.GoTextFaceSource
@@ -226,19 +230,32 @@ func errorLines(errs map[string]error, limit int) []string {
 	return lines
 }
 
+// hudState は HUD に出す値。
+type hudState struct {
+	BPM       float64
+	Measured  bool // false（タップも set_bpm もしていない既定値）なら BPM に (default) を付ける
+	FadeBeats float32
+	Mix       float32
+	AVOffset  time.Duration // 0 なら出さない
+	Errs      map[string]error
+	LLMSlots  []string // 有ればキー 8・9 の行を状態行の次に出す
+}
+
 // hudText は HUD に描く文字列を組み立てる。
-// measured が false（タップも set_bpm もしていない既定値）なら、BPM に (default) を付ける。
-// llmSlots が有ればキー 8・9 の行を状態行の次に出す。
-func hudText(bpm float64, measured bool, fadeBeats, mix float32, errs map[string]error, llmSlots []string) string {
-	bpmText := fmt.Sprintf("%.1f", bpm)
-	if !measured {
+func hudText(st hudState) string {
+	bpmText := fmt.Sprintf("%.1f", st.BPM)
+	if !st.Measured {
 		bpmText += " (default)"
 	}
-	lines := []string{fmt.Sprintf("BPM: %s  FadeBeats: %.1f  Mix: %.2f", bpmText, fadeBeats, mix)}
-	if line := llmHUDLine(llmSlots); line != "" {
+	status := fmt.Sprintf("BPM: %s  FadeBeats: %.1f  Mix: %.2f", bpmText, st.FadeBeats, st.Mix)
+	if st.AVOffset != 0 {
+		status += fmt.Sprintf("  AV offset: %dms", st.AVOffset.Milliseconds())
+	}
+	lines := []string{status}
+	if line := llmHUDLine(st.LLMSlots); line != "" {
 		lines = append(lines, line)
 	}
-	lines = append(lines, errorLines(errs, hudMaxErrors)...)
+	lines = append(lines, errorLines(st.Errs, hudMaxErrors)...)
 
 	return strings.Join(lines, "\n")
 }
@@ -296,13 +313,21 @@ type options struct {
 	version     bool
 	// llmSlots は検査済みの -llm-slots の予約名（nil なら無効）。
 	llmSlots []string
+	// avOffset は -av-offset（映像の拍を遅らせる時間）。
+	avOffset time.Duration
 }
 
-// parseFlags は args（プログラム名を除く）を解釈する。
-// -llm-slots の値は control.ParseLLMSlots で検査し、違反なら（FlagSet がエラーと使い方を出して）起動エラーにする。
+// parseFlags は args（プログラム名を除く）を解釈する。エラーと使い方は標準エラーに出す。
 func parseFlags(args []string) (options, error) {
+	return parseFlagsTo(args, os.Stderr)
+}
+
+// parseFlagsTo は args を解釈し、エラーと使い方を out に出す。
+// -llm-slots の値は control.ParseLLMSlots で検査し、違反なら（FlagSet がエラーと使い方を出して）起動エラーにする。
+func parseFlagsTo(args []string, out io.Writer) (options, error) {
 	var opts options
 	fs := flag.NewFlagSet("kagelife", flag.ContinueOnError)
+	fs.SetOutput(out)
 	fs.StringVar(&opts.shaderDir, "shaders", "shaders", "シェーダー（*.kage）を置くディレクトリ")
 	fs.StringVar(&opts.controlAddr, "control-addr", "127.0.0.1:0", "制御口の待受アドレス（ループバックのみ。ポート 0 は空きポート）")
 	fs.BoolVar(&opts.version, "version", false, "バージョンを出力して終了する")
@@ -311,6 +336,14 @@ func parseFlags(args []string) (options, error) {
 		func(s string) error {
 			slots, err := control.ParseLLMSlots(s)
 			opts.llmSlots = slots
+
+			return err
+		})
+	fs.Func("av-offset",
+		"映像の拍を遅らせるミリ秒（0〜1000、既定 0）。Bluetooth スピーカーの遅れに合わせる",
+		func(s string) error {
+			d, err := parseAVOffset(s)
+			opts.avOffset = d
 
 			return err
 		})
@@ -467,7 +500,7 @@ func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) {
 		Time:    float32(now.Sub(g.startAt).Seconds()),
 		Width:   w,
 		Height:  h,
-		Beat:    g.tapper.Phase(now),
+		Beat:    visualPhase(g.tapper, now, g.avOffset),
 		CursorX: g.cursorX,
 		CursorY: g.cursorY,
 		Frame:   g.frame,
@@ -516,7 +549,15 @@ func (g *Game) offscreenFor(w, h int) *ebiten.Image {
 // 文字サイズと位置はデバイスの拡大率に合わせる。
 func (g *Game) drawHUD(screen *ebiten.Image) {
 	s := ebiten.Monitor().DeviceScaleFactor()
-	msg := hudText(g.tapper.BPM(), g.tapper.Measured(), g.sm.FadeBeats(), g.sm.MixRatio(), g.errs, g.llmSlots)
+	msg := hudText(hudState{
+		BPM:       g.tapper.BPM(),
+		Measured:  g.tapper.Measured(),
+		FadeBeats: g.sm.FadeBeats(),
+		Mix:       g.sm.MixRatio(),
+		AVOffset:  g.avOffset,
+		Errs:      g.errs,
+		LLMSlots:  g.llmSlots,
+	})
 	face := &text.GoTextFace{Source: hudFaceSource, Size: g.hudSize * s}
 	// text/v2 は LineSpacing が 0 だと改行しても行が重なるので、複数行のエラーに備えて指定する。
 	lineSpacing := face.Size * 1.2
@@ -573,7 +614,7 @@ func main() {
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowTitle(appName)
 
-	if err := run(opts.shaderDir, opts.controlAddr, opts.llmSlots); err != nil {
+	if err := run(opts); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -591,8 +632,9 @@ func logLLMSlots(llmSlots []string) {
 }
 
 // run は制御口を起動してからゲームを回し、終了時に制御口を閉じて発見ファイルを消す。
-func run(shaderDirArg, controlAddr string, llmSlots []string) error {
-	shaderDir, err := filepath.Abs(shaderDirArg)
+func run(opts options) error {
+	controlAddr, llmSlots := opts.controlAddr, opts.llmSlots
+	shaderDir, err := filepath.Abs(opts.shaderDir)
 	if err != nil {
 		return fmt.Errorf("shader dir: %w", err)
 	}
@@ -605,6 +647,10 @@ func run(shaderDirArg, controlAddr string, llmSlots []string) error {
 		return err
 	}
 	defer g.watcher.Close()
+	g.avOffset = opts.avOffset
+	if g.avOffset != 0 {
+		log.Printf("av-offset: %dms (Beat only)", g.avOffset.Milliseconds())
+	}
 
 	ctl, err := control.Start(control.Config{
 		Addr:      controlAddr,

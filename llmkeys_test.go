@@ -184,7 +184,7 @@ func TestShaderListLines_LLMSlotsMoreThanSeven(t *testing.T) {
 }
 
 func TestHUDText_LLMSlots(t *testing.T) {
-	got := hudText(120, true, 4, 0.25, nil, []string{"llm_a", "llm_b"})
+	got := hudText(hudState{BPM: 120, Measured: true, FadeBeats: 4, Mix: 0.25, LLMSlots: []string{"llm_a", "llm_b"}})
 	want := "BPM: 120.0  FadeBeats: 4.0  Mix: 0.25\n8: llm_a (LLM)  9: llm_b (LLM)"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
