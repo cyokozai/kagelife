@@ -1,0 +1,25 @@
+//kage:unit pixels
+package main
+
+var Time float
+var Beat float
+var Resolution vec2
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	uv := dstPos.xy / Resolution
+	p := uv*8.0 - 4.0
+
+	v := sin(p.x + Time)
+	v += sin((p.y + Time) * 0.5)
+	v += sin((p.x + p.y + Time) * 0.5)
+
+	cx := p.x + 0.5*sin(Time/5.0)
+	cy := p.y + 0.5*cos(Time/3.0)
+	v += sin(sqrt(cx*cx+cy*cy+1.0) + Time)
+	v *= 0.25
+
+	PI := 3.1415926
+	col := vec3(sin(v*PI), sin(v*PI+2.094), sin(v*PI+4.188))*0.5 + 0.5
+	col *= 1.0 + (1.0-Beat)*0.3
+	return vec4(col, 1.0)
+}

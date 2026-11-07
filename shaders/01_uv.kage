@@ -1,0 +1,9 @@
+//kage:unit pixels
+package main
+
+var Resolution vec2
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+  uv := dstPos.xy / Resolution
+  return vec4(uv.x, uv.y, 0.0, 1.0)
+}
