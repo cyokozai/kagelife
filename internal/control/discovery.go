@@ -91,12 +91,33 @@ func WriteDiscovery(path string, d Discovery) (err error) {
 		return err
 	}
 
+	// 置き換えは RemoveDiscovery の「読む→比べる→消す」と排他にする
+	unlock, err := lockDiscovery(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	return os.Rename(tmp.Name(), path)
 }
 
+// testHookBeforeRemove はテスト用の差し込み口。RemoveDiscovery が token を確かめた後、
+// 削除する前に呼ばれる。本番では nil のまま。
+var testHookBeforeRemove func()
+
 // RemoveDiscovery は path の発見ファイルが token のものであれば削除する。
 // 別のプロセスが上書きした発見ファイルは消さない。ファイルが無ければ何もしない。
+// 読む・token を比べる・消すをロックの中で行い、その間に WriteDiscovery が置き換えないようにする。
 func RemoveDiscovery(path, token string) error {
+	unlock, err := lockDiscovery(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil // ディレクトリごと無い。発見ファイルも無い
+	}
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -107,6 +128,9 @@ func RemoveDiscovery(path, token string) error {
 	var d Discovery
 	if json.Unmarshal(b, &d) != nil || d.Token != token {
 		return nil
+	}
+	if testHookBeforeRemove != nil {
+		testHookBeforeRemove()
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err

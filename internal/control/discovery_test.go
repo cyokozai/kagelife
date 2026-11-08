@@ -116,6 +116,77 @@ func TestRemoveDiscovery_OnlyOwnToken(t *testing.T) {
 	}
 }
 
+// token を確かめた後・消す前に別のプロセスが発見ファイルを書き換えても、
+// 新しい発見ファイルは残る（PR #7 の指摘: 読む→比べる→消すの間の競合）。
+func TestRemoveDiscovery_KeepsFileReplacedAfterCheck(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "control.json")
+	if err := WriteDiscovery(path, Discovery{Token: "old", Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	writeDone := make(chan error, 1)
+	testHookBeforeRemove = func() {
+		// 別のプロセスの WriteDiscovery を模す。排他されていれば、ここでは書き終わらない
+		go func() { writeDone <- WriteDiscovery(path, Discovery{Token: "new", Version: 1}) }()
+		select {
+		case err := <-writeDone:
+			writeDone <- err // 下で受け取るために戻す
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	t.Cleanup(func() { testHookBeforeRemove = nil })
+
+	if err := RemoveDiscovery(path, "old"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WriteDiscovery が終わらない")
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("新しいプロセスの発見ファイルが消された: %v", err)
+	}
+	var d Discovery
+	if err := json.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Token != "new" {
+		t.Errorf("Token = %q, want new", d.Token)
+	}
+}
+
+// 親ディレクトリごと無いときは何もせず、ディレクトリも作らない。
+func TestRemoveDiscovery_MissingDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nope")
+	if err := RemoveDiscovery(filepath.Join(dir, "control.json"), "x"); err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Error("無かったディレクトリが作られた")
+	}
+}
+
+// ロックファイルは 0600 で、発見ファイルの隣に置く。
+func TestWriteDiscovery_LockFile0600(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "control.json")
+	if err := WriteDiscovery(path, Discovery{Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(path + ".lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := st.Mode().Perm(); perm != 0o600 {
+		t.Errorf("perm = %o, want 600", perm)
+	}
+}
+
 func TestListenLoopback(t *testing.T) {
 	for _, addr := range []string{"127.0.0.1:0", "[::1]:0"} {
 		ln, err := ListenLoopback(addr)
