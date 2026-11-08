@@ -30,8 +30,6 @@ func newLinkTestGame(t *testing.T) (*Game, *carabiner.Estimator) {
 	return g, est
 }
 
-func near64(a, b float64) bool { return math.Abs(a-b) < 1e-6 }
-
 func TestLinkSync_SyncedUsesLinkBPMAndPhase(t *testing.T) {
 	g, _ := newLinkTestGame(t)
 
@@ -80,6 +78,10 @@ func TestLinkSync_TapDoesNotChangeBPMOrPhaseWhileSynced(t *testing.T) {
 		want := float32(math.Mod(10.25+at.Sub(linkT0).Seconds()*128/60, 1))
 		if got := g.beatPhase(at); !near(got, want) {
 			t.Fatalf("%d 回目のタップの後の phase = %v, want %v", i, got, want)
+		}
+		// 切れたときに引き継ぐ tapper の拍頭も、タップで動いていない
+		if got := g.tapper.Phase(at); !near(got, want) {
+			t.Fatalf("%d 回目のタップの後の tapper の phase = %v, want %v", i, got, want)
 		}
 	}
 }
