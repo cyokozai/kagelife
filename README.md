@@ -11,36 +11,61 @@ KageLife は，Ebitengine の Kage シェーダーを保存するだけで画面
 [GitHub Releases](https://github.com/cyokozai/kagelife/releases) からビルド済みの配布物を入手できます．
 対象は次の 4 つです．
 
-| OS | アーキテクチャ | ファイル名 |
-| --- | --- | --- |
-| macOS | Apple シリコン | `kagelife-<version>-darwin-arm64.tar.gz` |
-| macOS | Intel | `kagelife-<version>-darwin-amd64.tar.gz` |
-| Linux | x86_64 | `kagelife-<version>-linux-amd64.tar.gz` |
-| Linux | arm64 | `kagelife-<version>-linux-arm64.tar.gz` |
+| OS | アーキテクチャ | `uname -m` の表示 | ファイル名 |
+| --- | --- | --- | --- |
+| macOS | Apple シリコン | `arm64` | `kagelife-<version>-darwin-arm64.tar.gz` |
+| macOS | Intel | `x86_64` | `kagelife-<version>-darwin-amd64.tar.gz` |
+| Linux | x86_64 | `x86_64` | `kagelife-<version>-linux-amd64.tar.gz` |
+| Linux | arm64 | `aarch64` | `kagelife-<version>-linux-arm64.tar.gz` |
 
-### 1. ダウンロードと検証
+以下の例は，Apple シリコンの Mac に `~/Applications/kagelife` へ入れる場合です．
+版・OS・アーキテクチャと置き場所は，使う環境に合わせて書き換えてください（Linux なら `~/.local/opt/kagelife` など）．
 
-使う環境の `tar.gz` と，同じリリースにある `SHA256SUMS` を同じディレクトリに置き，チェックサムを確かめます．
+### 1. ダウンロード
+
+置き場所を作り，使う環境の `tar.gz` と，同じリリースにある `SHA256SUMS` を同じディレクトリに落とします．
+
+```bash
+VERSION=v0.1.0
+ASSET=kagelife-$VERSION-darwin-arm64
+mkdir -p ~/Applications/kagelife && cd ~/Applications/kagelife
+```
+
+[GitHub CLI](https://cli.github.com/)（`gh`）を使う場合:
+
+```bash
+gh release download $VERSION -R cyokozai/kagelife -p "$ASSET.tar.gz" -p SHA256SUMS
+```
+
+`curl` を使う場合:
+
+```bash
+curl -LO https://github.com/cyokozai/kagelife/releases/download/$VERSION/$ASSET.tar.gz
+curl -LO https://github.com/cyokozai/kagelife/releases/download/$VERSION/SHA256SUMS
+```
+
+ブラウザで落としてもかまいません．その場合は 2 つのファイルを置き場所へ移してください．
+
+### 2. 検証
 
 `SHA256SUMS` には全 OS の配布物が載っているので，落としたファイルの行だけを取り出して検証します．
 
 ```bash
 # macOS
-grep kagelife-<version>-<os>-<arch>.tar.gz SHA256SUMS | shasum -a 256 -c -
+grep "$ASSET.tar.gz" SHA256SUMS | shasum -a 256 -c -
 # Linux
-grep kagelife-<version>-<os>-<arch>.tar.gz SHA256SUMS | sha256sum -c -
+grep "$ASSET.tar.gz" SHA256SUMS | sha256sum -c -
 ```
 
-`OK` と表示されれば検証は完了です．
+`kagelife-<version>-<os>-<arch>.tar.gz: OK` と表示されれば検証は完了です．
 
-### 2. 展開
+### 3. 展開
 
 ```bash
-tar -xzf kagelife-<version>-<os>-<arch>.tar.gz
-cd kagelife-<version>-<os>-<arch>
+tar -xzf "$ASSET.tar.gz"
 ```
 
-展開したディレクトリには次のファイルが入っています．
+`~/Applications/kagelife/<ASSET>/` に次のファイルが入ります．
 
 | ファイル | 内容 |
 | --- | --- |
@@ -49,17 +74,60 @@ cd kagelife-<version>-<os>-<arch>
 | `README.md` | このファイル |
 | `LICENSE` | ライセンス（MIT） |
 
-### 3. 起動前の準備
+### 4. 起動前の準備
 
 - **macOS**: ブラウザで落としたファイルには quarantine 属性が付き，そのままでは Gatekeeper に止められます．次のコマンドで外してください．
+  `gh` や `curl` で落とした場合は属性が付かないので，`No such xattr: com.apple.quarantine` と表示されますが，問題ありません．
 
   ```bash
-  xattr -d com.apple.quarantine kagelife
+  xattr -d com.apple.quarantine "$ASSET/kagelife"
   ```
 
 - **Linux**: X11 と OpenGL の実行時ライブラリが要ります．デスクトップ環境の入った多くのディストリビューションでは入っています．
 
-展開したディレクトリで `./kagelife` を実行すると起動します．
+### 5. コマンドとして使えるようにする
+
+展開したディレクトリの `kagelife` は PATH に入っていないので，そのまま `kagelife` と打つと `command not found` になります．
+展開したディレクトリの中で `./kagelife` と打てば起動できますが，どこからでも `kagelife` で呼べるようにするには，次の 2 つを行います．
+
+版に依存しない入口として `current` というリンクを作ります．
+
+```bash
+ln -sfn ~/Applications/kagelife/$ASSET ~/Applications/kagelife/current
+```
+
+そのリンクを PATH に足します．zsh（macOS の既定）なら `~/.zshrc`，bash なら `~/.bashrc` の末尾に 1 行足し，シェルに読み込み直します．
+
+```bash
+echo 'export PATH="$PATH:$HOME/Applications/kagelife/current"' >> ~/.zshrc
+source ~/.zshrc
+which kagelife   # ~/Applications/kagelife/current/kagelife と出れば完了
+```
+
+`~/.local/bin` のように，すでに PATH に入っているディレクトリがあるなら，シェルの設定ファイルを触らずに `ln -s ~/Applications/kagelife/current/kagelife ~/.local/bin/kagelife` でもかまいません．
+
+### 6. 起動
+
+```bash
+kagelife -shaders ~/Applications/kagelife/current/shaders
+```
+
+`-shaders` を省くと，**いまいるディレクトリ**の `shaders/` を読みます（起動した場所に依存します）．
+コマンドとして使うときは，使うシェーダーのフォルダを `-shaders` で指定してください．
+
+### 新しい版への更新
+
+新しい版を 1〜4 の手順で同じ置き場所に落として展開し，`current` のリンクを張り替えます．PATH の設定はそのままで使えます．
+
+```bash
+VERSION=<新しい版>
+ASSET=kagelife-$VERSION-darwin-arm64
+# 1〜4 の手順のあと
+ln -sfn ~/Applications/kagelife/$ASSET ~/Applications/kagelife/current
+kagelife -version
+```
+
+古い版のディレクトリは，動作を確かめてから消してください．
 
 ---
 
@@ -67,10 +135,11 @@ cd kagelife-<version>-<os>-<arch>
 
 ### 起動
 
-配布物を使う場合は，展開したディレクトリで次を実行します．
+配布物を使う場合は，「インストール」の 5 で PATH に入れていれば次を実行します．
+PATH に入れていない場合は，展開したディレクトリで `./kagelife` と打ちます（`./` を付けないと `command not found` になります）．
 
 ```bash
-./kagelife
+kagelife -shaders ~/Applications/kagelife/current/shaders
 ```
 
 ソースから動かす場合は，リポジトリのルートディレクトリで次のどちらかを実行します．
