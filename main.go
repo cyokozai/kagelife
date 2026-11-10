@@ -359,10 +359,10 @@ type options struct {
 	listDisplays bool
 	// fullscreen は -fullscreen（起動時から全画面）。
 	fullscreen bool
-	// renderScale は -render-scale（シェーダーを描く解像度の倍率。1.0 は画面のまま）。
-	renderScale float64
 	// previews は -previews（GET /v1/previews。false なら描かず、404 にし、features に出さない）。
 	previews bool
+	// renderScale は -render-scale（シェーダーを描く解像度の倍率。1.0 は画面のまま）。
+	renderScale float64
 }
 
 // parseFlags は args（プログラム名を除く）を解釈する。エラーと使い方は標準エラーに出す。
@@ -405,6 +405,8 @@ func parseFlagsTo(args []string, out io.Writer) (options, error) {
 		})
 	fs.BoolVar(&opts.listDisplays, "list-displays", false, "ディスプレイの番号・名前・大きさを出力して終了する")
 	fs.BoolVar(&opts.fullscreen, "fullscreen", false, "起動時から全画面にする（全画面のあいだはカーソルを隠す）")
+	fs.BoolVar(&opts.previews, "previews", true,
+		"制御口の GET /v1/previews（Stream Deck のキーに出す数字キーのシェーダの動くデモ）を有効にする。false なら描かない")
 	fs.Func("render-scale",
 		"シェーダーを描く解像度の倍率（0.25〜1.0、既定 1.0）。1.0 未満なら縮めて描き、拡大して出す",
 		func(s string) error {
@@ -413,8 +415,6 @@ func parseFlagsTo(args []string, out io.Writer) (options, error) {
 
 			return err
 		})
-	fs.BoolVar(&opts.previews, "previews", true,
-		"制御口の GET /v1/previews（Stream Deck のキーに出す数字キーのシェーダの動くデモ）を有効にする。false なら描かない")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
