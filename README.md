@@ -166,6 +166,8 @@ go run .
 | `-list-displays` | — | ディスプレイの番号・名前・大きさ・拡大率を表示して終了する（ウィンドウは開かない） |
 | `-display <N>` | なし | ウィンドウ（全画面）を出すディスプレイの番号（1 始まり．`-list-displays` の番号）．範囲外なら一覧を出して起動エラー |
 | `-fullscreen` | — | 起動時から全画面にする．全画面のあいだはマウスカーソルを隠し，`F` でウィンドウに戻すと表示に戻す |
+| `-link` | 無効 | Carabiner 経由で Ableton Link（rekordbox の LINK など）に BPM と拍を合わせる．後述の「Ableton Link で拍を合わせる」を参照 |
+| `-link-addr <addr>` | `127.0.0.1:17000` | `-link` のときに接続する Carabiner の待受アドレス |
 | `-render-scale <S>` | `1.0` | シェーダーを描く解像度の倍率（0.25〜1.0）．1.0 未満なら画面 × S の大きさに描き，線形補間で拡大して出す（GPU の負荷を下げる）．このときシェーダーの `Resolution` は縮めた大きさ，`Cursor` も同じ倍率で縮めた座標になる．HUD は縮めない．制御口の state の `resolution` は画面の大きさのまま．範囲外は起動エラー |
 
 ```bash
@@ -200,7 +202,7 @@ go run .
 | --- | --- |
 | `1` 〜 `9` | N 番目のシェーダーに即座に切り替える |
 | `Shift` + `1` 〜 `9` | N 番目のシェーダーへクロスフェードする（フェード時間は拍数で指定） |
-| `Space` | タップテンポ．叩いた間隔から BPM を求める |
+| `Space` | タップテンポ．叩いた間隔から BPM を求める（`-link` で Link に同期中は無視する） |
 | `[` | クロスフェードの拍数を 1 段階減らす |
 | `]` | クロスフェードの拍数を 1 段階増やす |
 | `H` | HUD（BPM・フェード拍数・ミックス比・エラー）の表示を切り替える |
@@ -225,6 +227,25 @@ go run .
 | 上記以外で，Mix < 0.5 | 切り替え元のままにして，新しいフェードを始める |
 
 詳細は [ADR-008](docs/adr/ADR-008-crossfade-compositing.md) にあります．
+
+### Ableton Link で拍を合わせる（`-link`）
+
+`-link` を付けると，[Carabiner](https://github.com/Deep-Symmetry/carabiner)（Ableton Link を TCP のテキストで中継する別のプログラム）に接続し，Link のセッション（rekordbox の LINK など）の BPM と拍に合わせます．
+kagelife は Link の SDK を持たず，Carabiner とだけ話します．Carabiner は自分で入手して，kagelife を動かす機体で先に起動しておきます（`127.0.0.1` しか受け付けないため）．
+
+- **Mac 1 台**（rekordbox と kagelife が同じ Mac）: その Mac で `./Carabiner` を起動し，rekordbox の LINK を ON にしてから `./kagelife -link` を起動します．
+- **2 台**（rekordbox の機体と kagelife の機体を LAN でつなぐ）: Carabiner は **kagelife 側の機体**で起動します．Link は同じ LAN の上で相手を探すので，2 台は同じネットワークにつなぎます．rekordbox の機体には Carabiner は要りません．
+
+```bash
+./Carabiner          # 別のターミナルで起動し，開いたままにする
+./kagelife -link     # 既定の 127.0.0.1:17000 に接続する
+```
+
+- Carabiner の入手・署名の確かめ方・rekordbox の LINK の入れ方は [docs/poc-carabiner-link.md](docs/poc-carabiner-link.md) にあります．
+- Link の相手がいるあいだ（同期中）は，BPM（HUD・クロスフェードの進み方）と `Beat` を Link から取ります．`-av-offset` は Link の拍にも掛かります．`Space` のタップは BPM も拍頭も変えません．
+- HUD の状態行に `Link: synced (1 peer)` のように出ます．同期していないときは `Link: offline (tap)`（Carabiner につながらない）・`Link: waiting (tap)`（応答待ち）・`Link: no peers (tap)`（Link の相手がいない）で，タップテンポで動きます．
+- 同期が切れたら（Carabiner が落ちた・rekordbox の LINK を OFF にした），切れる直前の Link の BPM と拍頭をそのまま引き継いでタップテンポに戻ります．拍は飛びません．Carabiner が戻ると自動でつなぎ直します．
+- 制御口の `POST /v1/bpm`（set_bpm）は同期中も受け付けますが，次のフレームまでに Link の値へ戻ります．`GET /v1/state` の `bpm` は同期中は Link の BPM です（40〜300 に丸めた値）．
 
 ### LLM 背景スロット（`-llm-slots`，実験）
 
@@ -253,7 +274,7 @@ LLM（制御口を使う MCP サーバ）が書き込むシェーダーの名前
 | --- | --- | --- |
 | `Time` | `float` | 起動からの経過秒数 |
 | `Resolution` | `vec2` | 描画先の幅と高さ（ピクセル） |
-| `Beat` | `float` | 拍内の位相 `0..1`．タップも制御口の `POST /v1/bpm` もまだ無いときは既定の 120 BPM で刻む．タップするたびにそのタップが拍頭になり，2 回目のタップから叩いた間隔の BPM で刻む（1 回目と，2 秒を超えて空けた後のタップでは直前の BPM を保つ）．`POST /v1/bpm` はタップの前でも後でも BPM と拍頭（呼んだ時刻）を設定し，それまでのタップ履歴を捨てる．BPM は 40〜300 に制限される |
+| `Beat` | `float` | 拍内の位相 `0..1`．タップも制御口の `POST /v1/bpm` もまだ無いときは既定の 120 BPM で刻む．タップするたびにそのタップが拍頭になり，2 回目のタップから叩いた間隔の BPM で刻む（1 回目と，2 秒を超えて空けた後のタップでは直前の BPM を保つ）．`POST /v1/bpm` はタップの前でも後でも BPM と拍頭（呼んだ時刻）を設定し，それまでのタップ履歴を捨てる．BPM は 40〜300 に制限される．`-link` で Link に同期中は Link の拍内の位相 |
 | `Cursor` | `vec2` | マウスカーソルの位置（ピクセル） |
 | `Frame` | `int` | 起動からのフレーム数 |
 | `Random` | `float` | フレームごとに変わる `[0, 1)` の乱数 |

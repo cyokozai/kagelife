@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyokozai/kagelife/internal/carabiner"
 	"github.com/cyokozai/kagelife/internal/control"
 	"github.com/cyokozai/kagelife/internal/filewatcher"
 	"github.com/cyokozai/kagelife/internal/shadermgr"
@@ -81,6 +82,9 @@ type Game struct {
 
 	// avOffset は -av-offset。映像の拍（Beat）だけを、この分だけ遅らせる（FR-156 の最小版）。
 	avOffset time.Duration
+
+	// link は -link の拍時計（nil なら無効）。同期中は BPM と Beat を Link から取る。
+	link *linkClock
 
 	// cursor は全画面のあいだカーソルを隠す。
 	cursor cursorSync
@@ -271,6 +275,7 @@ type hudState struct {
 	FadeBeats float32
 	Mix       float32
 	AVOffset  time.Duration // 0 なら出さない
+	Link      string        // -link の状態（空なら出さない）
 	Perf      *perfState    // 有れば状態行の次に fps とフレーム時間の最大値の行を出す
 	Errs      map[string]error
 	LLMSlots  []string // 有ればキー 8・9 の行を状態行の次に出す
@@ -285,6 +290,9 @@ func hudText(st hudState) string {
 	status := fmt.Sprintf("BPM: %s  FadeBeats: %.1f  Mix: %.2f", bpmText, st.FadeBeats, st.Mix)
 	if st.AVOffset != 0 {
 		status += fmt.Sprintf("  AV offset: %dms", st.AVOffset.Milliseconds())
+	}
+	if st.Link != "" {
+		status += "  Link: " + st.Link
 	}
 	lines := []string{status}
 	if st.Perf != nil {
@@ -363,6 +371,10 @@ type options struct {
 	previews bool
 	// renderScale は -render-scale（シェーダーを描く解像度の倍率。1.0 は画面のまま）。
 	renderScale float64
+	// link は -link（Carabiner 経由で Ableton Link に拍を合わせる）。
+	link bool
+	// linkAddr は -link-addr（Carabiner の待受アドレス）。
+	linkAddr string
 }
 
 // parseFlags は args（プログラム名を除く）を解釈する。エラーと使い方は標準エラーに出す。
@@ -373,7 +385,7 @@ func parseFlags(args []string) (options, error) {
 // parseFlagsTo は args を解釈し、エラーと使い方を out に出す。
 // -llm-slots の値は control.ParseLLMSlots で検査し、違反なら（FlagSet がエラーと使い方を出して）起動エラーにする。
 func parseFlagsTo(args []string, out io.Writer) (options, error) {
-	opts := options{renderScale: maxRenderScale}
+	opts := options{renderScale: maxRenderScale, linkAddr: carabiner.DefaultAddr}
 	fs := flag.NewFlagSet("kagelife", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.StringVar(&opts.shaderDir, "shaders", "shaders", "シェーダー（*.kage）を置くディレクトリ")
@@ -415,6 +427,9 @@ func parseFlagsTo(args []string, out io.Writer) (options, error) {
 
 			return err
 		})
+	fs.BoolVar(&opts.link, "link", false,
+		"Carabiner 経由で Ableton Link に BPM と拍を合わせる（Carabiner は別に起動しておく）。同期中はタップと set_bpm より Link を優先する")
+	fs.StringVar(&opts.linkAddr, "link-addr", carabiner.DefaultAddr, "-link のときに接続する Carabiner の待受アドレス")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -486,9 +501,8 @@ func (g *Game) Update() error {
 
 	g.handleSlotKeys()
 
-	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		g.tapper.Tap(time.Now())
-	}
+	// Link に同期中は BPM と拍頭を Link に合わせ、Space のタップは無視する
+	g.stepTempo(time.Now(), inpututil.IsKeyJustPressed(ebiten.KeySpace))
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
 		g.pressKey("[", false) // 制御口の POST /v1/keys と同じ処理
@@ -502,7 +516,7 @@ func (g *Game) Update() error {
 		g.showHUD = !g.showHUD
 	}
 
-	g.sm.Tick(g.tapper.BPM())
+	g.sm.Tick(g.bpm())
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyF) {
 		ebiten.SetFullscreen(!ebiten.IsFullscreen())
@@ -567,7 +581,7 @@ func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) {
 		CursorX: g.cursorX,
 		CursorY: g.cursorY,
 		Elapsed: now.Sub(g.startAt),
-		Beat:    visualPhase(g.tapper, now, g.avOffset),
+		Beat:    g.beatPhase(now),
 		Frame:   g.frame,
 		Random:  rand.Float32(),
 	})
@@ -636,8 +650,8 @@ func resizedImage(img *ebiten.Image, w, h int) *ebiten.Image {
 // hudState は now の時点で HUD に出す値を集める。
 func (g *Game) hudState(now time.Time) hudState {
 	return hudState{
-		BPM:       g.tapper.BPM(),
-		Measured:  g.tapper.Measured(),
+		BPM:       g.bpm(),
+		Measured:  g.tapper.Measured() || g.link.synced(),
 		FadeBeats: g.sm.CurrentFadeBeats(), // beats 指定のフェード中はその拍数（GET /v1/state の fade.beats と同じ）
 		Mix:       g.sm.MixRatio(),
 		AVOffset:  g.avOffset,
@@ -648,7 +662,17 @@ func (g *Game) hudState(now time.Time) hudState {
 		},
 		Errs:     g.errs,
 		LLMSlots: g.llmSlots,
+		Link:     g.linkHUD(),
 	}
+}
+
+// linkHUD は HUD に出す Link の状態。-link 無しなら空。
+func (g *Game) linkHUD() string {
+	if g.link == nil {
+		return ""
+	}
+
+	return g.link.hudText()
 }
 
 // drawHUD は状態とエラーを左上に描く。LayoutF がデバイスピクセルの論理画面を返すため、
@@ -769,6 +793,13 @@ func run(opts options) error {
 	if !opts.previews {
 		g.disablePreviews()
 		log.Print("previews: disabled (GET /v1/previews returns 404)")
+	}
+
+	if opts.link {
+		est, client := startLink(carabiner.Config{Addr: opts.linkAddr})
+		defer func() { _ = client.Close() }()
+		g.link = newLinkClock(est)
+		log.Printf("link: enabled (Carabiner %s; tap tempo is used until Link has peers)", opts.linkAddr)
 	}
 
 	ctl, err := control.Start(control.Config{
