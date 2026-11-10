@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -90,6 +91,10 @@ type Game struct {
 	// frames は直近 5 秒のフレーム時間。fps は actualFPS（テストでは差し替え）で読む。
 	frames    *frameStats
 	actualFPS func() float64
+
+	// previews は GET /v1/previews の状態（制御口と共有）。要求が来ている間だけ preview で描く。
+	previews *control.Previews
+	preview  previewRenderer
 }
 
 var hudFaceSource *text.GoTextFaceSource
@@ -108,7 +113,7 @@ var (
 // llmSlots は検査済みの -llm-slots の予約名（nil なら無効）。
 func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, error) {
 	g := &Game{
-		sm:       shadermgr.New(ebitenCompiler),
+		sm:       shadermgr.New(checkedCompiler), // 予約 uniform の型違いもコンパイル失敗として弾く
 		tapper:   tempo.New(2*time.Second, 8),
 		startAt:  time.Now(),
 		showHUD:  true,
@@ -123,6 +128,7 @@ func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, 
 		actualFPS:   ebiten.ActualFPS,
 		queue:       queue,
 		llmSlots:    llmSlots,
+		previews:    control.NewPreviews(),
 	}
 	g.eng = &control.Engine{
 		SM:        g.sm,
@@ -131,6 +137,11 @@ func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, 
 		FPS:       ebiten.ActualFPS,
 		LLMSlots:  llmSlots,
 	}
+	// 制御口の POST /v1/keys と GET /v1/previews は、キーボードと同じ数字キーの対応を使う
+	g.eng.PressKey = g.pressControlKey
+	g.eng.PreviewSlots = g.previewSlots
+	// PUT のシェーダも、ゲームループで試し描きしてから入れる（描いたときの panic を防ぐ）
+	g.eng.Validate = validateShader
 
 	w, err := newShaderWatcher(shaderDir)
 	if err != nil {
@@ -348,6 +359,8 @@ type options struct {
 	listDisplays bool
 	// fullscreen は -fullscreen（起動時から全画面）。
 	fullscreen bool
+	// previews は -previews（GET /v1/previews。false なら描かず、404 にし、features に出さない）。
+	previews bool
 	// renderScale は -render-scale（シェーダーを描く解像度の倍率。1.0 は画面のまま）。
 	renderScale float64
 }
@@ -392,6 +405,8 @@ func parseFlagsTo(args []string, out io.Writer) (options, error) {
 		})
 	fs.BoolVar(&opts.listDisplays, "list-displays", false, "ディスプレイの番号・名前・大きさを出力して終了する")
 	fs.BoolVar(&opts.fullscreen, "fullscreen", false, "起動時から全画面にする（全画面のあいだはカーソルを隠す）")
+	fs.BoolVar(&opts.previews, "previews", true,
+		"制御口の GET /v1/previews（Stream Deck のキーに出す数字キーのシェーダの動くデモ）を有効にする。false なら描かない")
 	fs.Func("render-scale",
 		"シェーダーを描く解像度の倍率（0.25〜1.0、既定 1.0）。1.0 未満なら縮めて描き、拡大して出す",
 		func(s string) error {
@@ -476,11 +491,11 @@ func (g *Game) Update() error {
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
-		g.sm.DecFadeBeats()
+		g.pressKey("[", false) // 制御口の POST /v1/keys と同じ処理
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyBracketRight) {
-		g.sm.IncFadeBeats()
+		g.pressKey("]", false)
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
@@ -505,40 +520,30 @@ func (g *Game) Update() error {
 
 // handleSlotKeys は数字キーでシェーダーを切り替える。数字は即時切替、Shift＋数字はクロスフェード。
 // -llm-slots 有りのときは 8・9 が予約名、0 が直前に映っていた予約名以外のシェーダーへの即時切替。
+// 処理は制御口の POST /v1/keys と同じ pressKey を通す（[ ] は Update で同じく pressKey を呼ぶ）。
 func (g *Game) handleSlotKeys() {
-	paths := g.sm.Names()
-	if len(g.llmSlots) > 0 {
-		// キーを処理する前に記録するので、予約名へ切り替えた直後も切替前のシェーダーが残る
-		g.back.observe(paths, g.llmSlots, g.sm.ActiveIndex(), g.sm.Fading(), g.sm.FadeTargetIndex())
-	}
+	// キーを処理する前に記録するので、予約名へ切り替えた直後も切替前のシェーダーが残る
+	g.observeBack()
 
 	shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) ||
 		ebiten.IsKeyPressed(ebiten.KeyShiftRight)
 
-	for k, idx := range keySlots(paths, g.llmSlots) {
-		if idx < 0 || !inpututil.IsKeyJustPressed(ebiten.Key1+ebiten.Key(k)) {
-			continue
-		}
-		if shift {
-			g.sm.BeginFade(idx)
-		} else {
-			g.sm.Switch(idx)
+	for k := range numKeys {
+		if inpututil.IsKeyJustPressed(ebiten.Key1 + ebiten.Key(k)) {
+			g.pressKey(strconv.Itoa(k+1), shift)
 		}
 	}
-
-	if len(g.llmSlots) > 0 && inpututil.IsKeyJustPressed(ebiten.Key0) {
-		if i := g.back.target(paths, g.llmSlots, g.sm.Usable); i >= 0 {
-			g.sm.Switch(i)
-		}
+	if inpututil.IsKeyJustPressed(ebiten.Key0) {
+		g.pressKey("0", shift)
 	}
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	g.frames.observe(time.Now())
 
-	if shader, ok := g.sm.Active().(*ebiten.Shader); ok && shader != nil {
-		g.drawShaders(screen, shader)
-	}
+	// プレビュー（GET /v1/previews）は drawShaders の中で、本番の描画を積む前に描く
+	shader, _ := g.sm.Active().(*ebiten.Shader)
+	g.drawShaders(screen, shader)
 
 	if g.showHUD {
 		g.drawHUD(screen)
@@ -548,6 +553,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 // drawShaders はアクティブなシェーダー A を描き、フェード中なら B を画面外に描いてから重ねる。
 // -render-scale が 1 未満なら、A と B を画面 × S の画面外の画像に描き、線形補間で拡大して画面に出す。
 // 画面は既定で毎フレーム消去されるので、画面そのものに描くときは Clear しない。
+// 先にプレビュー（GET /v1/previews）を同じ uniform で描く。shader が nil ならプレビューだけを描く。
 func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) {
 	sw, sh := screen.Bounds().Dx(), screen.Bounds().Dy()
 
@@ -565,6 +571,14 @@ func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) {
 		Frame:   g.frame,
 		Random:  rand.Float32(),
 	})
+
+	// プレビューは本番と同じ uniform で、本番の描画を積む前に描いて読み出す。
+	// ReadPixels は積んである命令をすべて流して待つので、後にすると本番のフレームを巻き込む。要求が無ければ何もしない
+	g.drawPreviews(in, sw, sh)
+
+	if shader == nil {
+		return
+	}
 	uniforms := g.uniforms.Build(in)
 	w, h := in.Width, in.Height
 
@@ -752,6 +766,10 @@ func run(opts options) error {
 	if g.avOffset != 0 {
 		log.Printf("av-offset: %dms (Beat only)", g.avOffset.Milliseconds())
 	}
+	if !opts.previews {
+		g.disablePreviews()
+		log.Print("previews: disabled (GET /v1/previews returns 404)")
+	}
 
 	ctl, err := control.Start(control.Config{
 		Addr:      controlAddr,
@@ -759,6 +777,7 @@ func run(opts options) error {
 		Compile:   ebitenCompiler,
 		Queue:     queue,
 		LLMSlots:  llmSlots,
+		Previews:  g.previews,
 	})
 	if err != nil {
 		return err

@@ -59,6 +59,18 @@ type Engine struct {
 	Resolution [2]int
 	// LLMSlots は -llm-slots の予約名（nil なら無効）。ServerConfig.LLMSlots と同じものを渡す。
 	LLMSlots []string
+	// PressKey は GUI のキーボードで key を押したのと同じ処理をする（POST /v1/keys）。
+	// key は validKey を通ったもの、shift は Shift を押しながらかどうか。
+	// キーに割り当てが無ければ何もせず false を返す。nil ならどのキーも割り当て無し。
+	PressKey func(key string, shift bool) bool
+	// PreviewSlots はキー 1〜9 に割り当たっているスロット（GET /v1/previews の keys）を返す。
+	// nil なら割り当て無し。
+	PreviewSlots func() []PreviewSlot
+	// Validate はコンパイル済みのシェーダを描いても落ちないか（予約 uniform の型違いが無いか）を確かめる。
+	// 描画を伴うのでゲームループの上で呼ぶ。nil なら検査しない。
+	Validate func(shadermgr.Shader) error
+	// NoPreviews は -previews=false。true なら features に previews を出さない（ServerConfig.Previews も nil にする）。
+	NoPreviews bool
 
 	lastErr *LastError
 }
@@ -104,7 +116,7 @@ func (e *Engine) State() State {
 			Mix:    float64(e.SM.MixRatio()),
 			Beats:  float64(e.SM.CurrentFadeBeats()),
 		},
-		Features: Features(),
+		Features: e.features(),
 		LLMSlots: append([]string{}, e.LLMSlots...),
 	}
 	if e.SM.Len() > 0 {
@@ -177,6 +189,15 @@ func (e *Engine) Crossfade(name string, beats float64) (float64, error) {
 	return beats, nil
 }
 
+// Key は GUI のキーボードで key を押したのと同じ処理をする。割り当てが無ければ ErrNotFound。
+func (e *Engine) Key(key string, shift bool) error {
+	if e.PressKey == nil || !e.PressKey(key, shift) {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
 // SetBPM は BPM を直接設定し、今を拍頭にする。範囲（40〜300）の検査は呼び出し側（postBPM）で行う。
 func (e *Engine) SetBPM(bpm float64) {
 	e.Tapper.SetBPM(bpm, e.now())
@@ -189,6 +210,28 @@ func (e *Engine) Install(name string, sh shadermgr.Shader) bool {
 	e.lastErr = nil
 
 	return created
+}
+
+// validate は Validate で sh を確かめる。Validate が nil なら常に nil。
+func (e *Engine) validate(sh shadermgr.Shader) error {
+	if e.Validate == nil {
+		return nil
+	}
+
+	return e.Validate(sh)
+}
+
+// InstallValidated は sh を Validate で確かめてから Install する。通らなければ sh を Dispose し、
+// last_error に name で記録して error を返す（Manager には触れない）。
+func (e *Engine) InstallValidated(name string, sh shadermgr.Shader) (bool, error) {
+	if err := e.validate(sh); err != nil {
+		sh.Dispose()
+		e.RecordError(name, err.Error())
+
+		return false, err
+	}
+
+	return e.Install(name, sh), nil
 }
 
 // ReloadFile はファイル監視で変更を検知した path を src で再コンパイルし、

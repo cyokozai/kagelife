@@ -38,6 +38,9 @@ type ServerConfig struct {
 	// LLMSlots は -llm-slots の予約名（nil なら無効）。空でなければ PUT はこの名前だけに書け、
 	// 映っている予約名には書けない。Engine.LLMSlots と同じものを渡す。
 	LLMSlots []string
+	// Previews は GET /v1/previews の状態。ゲームループ（描く側）と同じものを渡す。
+	// nil なら機能を止める（-previews=false）: GET /v1/previews は 404 not_found。Engine.NoPreviews も true にする。
+	Previews *Previews
 }
 
 // Server は制御口 v1 の http.Handler。
@@ -66,6 +69,10 @@ func NewServer(cfg ServerConfig) *Server {
 	s.route("/v1/switch", map[string]http.HandlerFunc{http.MethodPost: s.postSwitch})
 	s.route("/v1/crossfade", map[string]http.HandlerFunc{http.MethodPost: s.postCrossfade})
 	s.route("/v1/bpm", map[string]http.HandlerFunc{http.MethodPost: s.postBPM})
+	s.route("/v1/keys", map[string]http.HandlerFunc{http.MethodPost: s.postKeys})
+	if cfg.Previews != nil { // 無ければ未定義パスと同じ 404 not_found
+		s.route("/v1/previews", map[string]http.HandlerFunc{http.MethodGet: s.getPreviews})
+	}
 
 	return s
 }
@@ -259,10 +266,17 @@ func (s *Server) putShader(w http.ResponseWriter, r *http.Request) {
 	src := []byte(source)
 	sh, err := s.cfg.Compile(src)
 	if err != nil {
-		diags := Diagnose(src, err)
-		msg := Summarize(diags)
-		s.cfg.Queue.Post(func(e *Engine) { e.RecordError(name, msg) })
-		writeJSON(w, http.StatusUnprocessableEntity, errorBody{Error: "compile_error", Message: msg, Diagnostics: diags})
+		s.writeCompileError(w, name, src, err)
+
+		return
+	}
+
+	// 予約 uniform の型違いはコンパイルが通り、描いたときに panic する。書く前にゲームループで試し描きする。
+	// ループが止まっていて検査できなければ飛ばす（Install の処理でもう一度確かめるので、落ちるシェーダは入らない）
+	verr, qerr := call(s.cfg.Queue, s.cfg.Timeout, func(e *Engine) error { return e.validate(sh) })
+	if qerr == nil && verr != nil {
+		sh.Dispose()
+		s.writeCompileError(w, name, src, verr)
 
 		return
 	}
@@ -285,7 +299,11 @@ func (s *Server) putShader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = call(s.cfg.Queue, s.cfg.Timeout, func(e *Engine) bool { return e.Install(name, sh) })
+	installErr, err := call(s.cfg.Queue, s.cfg.Timeout, func(e *Engine) error {
+		_, err := e.InstallValidated(name, sh)
+
+		return err
+	})
 	if errors.Is(err, errNotQueued) {
 		sh.Dispose() // ファイルは書けているので、反映はファイル監視に委ねる
 	}
@@ -294,7 +312,22 @@ func (s *Server) putShader(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+	if installErr != nil {
+		// 書く前の検査を飛ばした（ループが遅れた）ときだけ来る。ファイルは書いてあるが Manager には入れていない
+		diags := Diagnose(src, installErr)
+		writeJSON(w, http.StatusUnprocessableEntity, errorBody{Error: "compile_error", Message: Summarize(diags), Diagnostics: diags})
+
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"name": name, "created": created})
+}
+
+// writeCompileError は PUT のコンパイル失敗（予約 uniform の型違いを含む）を 422 で返し、last_error に記録する。
+func (s *Server) writeCompileError(w http.ResponseWriter, name string, src []byte, err error) {
+	diags := Diagnose(src, err)
+	msg := Summarize(diags)
+	s.cfg.Queue.Post(func(e *Engine) { e.RecordError(name, msg) })
+	writeJSON(w, http.StatusUnprocessableEntity, errorBody{Error: "compile_error", Message: msg, Diagnostics: diags})
 }
 
 // checkLLMSlot は -llm-slots が有効なとき、name に PUT してよいかを判定する。
