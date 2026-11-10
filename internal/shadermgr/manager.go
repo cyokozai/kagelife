@@ -186,6 +186,16 @@ func (m *Manager) Active() Shader {
 	return m.slots[m.activeAIdx].shader
 }
 
+// ShaderAt はスロット idx のシェーダーを返す。範囲外やコンパイルに失敗したスロットなら nil。
+// 制御口のプレビューが、キーに割り当たったスロットを A・B と別に描くために使う。
+func (m *Manager) ShaderAt(idx int) Shader {
+	if !m.usable(idx) {
+		return nil
+	}
+
+	return m.slots[idx].shader
+}
+
 func (m *Manager) ActiveIndex() int {
 	return m.activeAIdx
 }

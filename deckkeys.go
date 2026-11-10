@@ -71,17 +71,10 @@ func (g *Game) pressControlKey(key string, shift bool) bool {
 // previewSlots はキー 1〜9 に割り当たっているスロットをキーの順に返す（GET /v1/previews の keys）。
 // 割り当ての無いキーは含めない。
 func (g *Game) previewSlots() []control.PreviewSlot {
-	paths := g.sm.Names()
-	out := make([]control.PreviewSlot, 0, numKeys)
-	for k, idx := range keySlots(paths, g.llmSlots) {
-		if idx < 0 {
-			continue
-		}
-		out = append(out, control.PreviewSlot{
-			Key:          strconv.Itoa(k + 1),
-			Name:         control.NameFromPath(paths[idx]),
-			CompileError: !g.sm.Usable(idx),
-		})
+	targets := g.previewTargets()
+	out := make([]control.PreviewSlot, len(targets))
+	for i, t := range targets {
+		out[i] = t.slot
 	}
 
 	return out

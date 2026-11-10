@@ -38,6 +38,8 @@ type ServerConfig struct {
 	// LLMSlots は -llm-slots の予約名（nil なら無効）。空でなければ PUT はこの名前だけに書け、
 	// 映っている予約名には書けない。Engine.LLMSlots と同じものを渡す。
 	LLMSlots []string
+	// Previews は GET /v1/previews の状態。ゲームループ（描く側）と同じものを渡す。nil なら新しく作る（描く側が無いので jpeg は常に null）。
+	Previews *Previews
 }
 
 // Server は制御口 v1 の http.Handler。
@@ -53,6 +55,9 @@ func NewServer(cfg ServerConfig) *Server {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultTimeout
 	}
+	if cfg.Previews == nil {
+		cfg.Previews = NewPreviews()
+	}
 	s := &Server{cfg: cfg, mux: http.NewServeMux()}
 
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
@@ -67,6 +72,7 @@ func NewServer(cfg ServerConfig) *Server {
 	s.route("/v1/crossfade", map[string]http.HandlerFunc{http.MethodPost: s.postCrossfade})
 	s.route("/v1/bpm", map[string]http.HandlerFunc{http.MethodPost: s.postBPM})
 	s.route("/v1/keys", map[string]http.HandlerFunc{http.MethodPost: s.postKeys})
+	s.route("/v1/previews", map[string]http.HandlerFunc{http.MethodGet: s.getPreviews})
 
 	return s
 }

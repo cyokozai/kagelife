@@ -162,6 +162,7 @@ type Config struct {
 	Queue         *Queue
 	Timeout       time.Duration // 0 なら DefaultTimeout
 	LLMSlots      []string      // -llm-slots の予約名（nil なら無効）。ServerConfig.LLMSlots を参照
+	Previews      *Previews     // GET /v1/previews の状態。ServerConfig.Previews を参照
 }
 
 // Controller は起動中の制御口。
@@ -203,6 +204,7 @@ func Start(cfg Config) (*Controller, error) {
 				Queue:     cfg.Queue,
 				Timeout:   cfg.Timeout,
 				LLMSlots:  cfg.LLMSlots,
+				Previews:  cfg.Previews,
 			}),
 			ReadHeaderTimeout: 5 * time.Second,
 		},
