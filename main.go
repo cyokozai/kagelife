@@ -113,7 +113,7 @@ var (
 // llmSlots は検査済みの -llm-slots の予約名（nil なら無効）。
 func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, error) {
 	g := &Game{
-		sm:       shadermgr.New(ebitenCompiler),
+		sm:       shadermgr.New(checkedCompiler), // 予約 uniform の型違いもコンパイル失敗として弾く
 		tapper:   tempo.New(2*time.Second, 8),
 		startAt:  time.Now(),
 		showHUD:  true,
@@ -140,6 +140,8 @@ func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, 
 	// 制御口の POST /v1/keys と GET /v1/previews は、キーボードと同じ数字キーの対応を使う
 	g.eng.PressKey = g.pressControlKey
 	g.eng.PreviewSlots = g.previewSlots
+	// PUT のシェーダも、ゲームループで試し描きしてから入れる（描いたときの panic を防ぐ）
+	g.eng.Validate = validateShader
 
 	w, err := newShaderWatcher(shaderDir)
 	if err != nil {
@@ -535,11 +537,9 @@ func (g *Game) handleSlotKeys() {
 func (g *Game) Draw(screen *ebiten.Image) {
 	g.frames.observe(time.Now())
 
+	// プレビュー（GET /v1/previews）は drawShaders の中で、本番の描画を積む前に描く
 	shader, _ := g.sm.Active().(*ebiten.Shader)
-	in := g.drawShaders(screen, shader)
-
-	// プレビュー（GET /v1/previews）は本番と同じ uniform で描く。要求が無ければ何もしない
-	g.drawPreviews(in, screen.Bounds().Dx(), screen.Bounds().Dy())
+	g.drawShaders(screen, shader)
 
 	if g.showHUD {
 		g.drawHUD(screen)
@@ -549,8 +549,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 // drawShaders はアクティブなシェーダー A を描き、フェード中なら B を画面外に描いてから重ねる。
 // -render-scale が 1 未満なら、A と B を画面 × S の画面外の画像に描き、線形補間で拡大して画面に出す。
 // 画面は既定で毎フレーム消去されるので、画面そのものに描くときは Clear しない。
-// このフレームの uniform の値を返す（プレビューも同じ値で描く）。shader が nil なら何も描かずに値だけを返す。
-func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) uniform.Input {
+// 先にプレビュー（GET /v1/previews）を同じ uniform で描く。shader が nil ならプレビューだけを描く。
+func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) {
 	sw, sh := screen.Bounds().Dx(), screen.Bounds().Dy()
 
 	// 制御口の state の resolution は画面の大きさのまま（契約を変えない）
@@ -568,8 +568,12 @@ func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) uniform.
 		Random:  rand.Float32(),
 	})
 
+	// プレビューは本番と同じ uniform で、本番の描画を積む前に描いて読み出す。
+	// ReadPixels は積んである命令をすべて流して待つので、後にすると本番のフレームを巻き込む。要求が無ければ何もしない
+	g.drawPreviews(in, sw, sh)
+
 	if shader == nil {
-		return in
+		return
 	}
 	uniforms := g.uniforms.Build(in)
 	w, h := in.Width, in.Height
@@ -603,8 +607,6 @@ func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) uniform.
 		op.GeoM.Scale(float64(sw)/float64(w), float64(sh)/float64(h))
 		screen.DrawImage(target, op)
 	}
-
-	return in
 }
 
 // offscreenFor は w x h の画面外の画像（クロスフェードの B 側）を返す。

@@ -266,10 +266,17 @@ func (s *Server) putShader(w http.ResponseWriter, r *http.Request) {
 	src := []byte(source)
 	sh, err := s.cfg.Compile(src)
 	if err != nil {
-		diags := Diagnose(src, err)
-		msg := Summarize(diags)
-		s.cfg.Queue.Post(func(e *Engine) { e.RecordError(name, msg) })
-		writeJSON(w, http.StatusUnprocessableEntity, errorBody{Error: "compile_error", Message: msg, Diagnostics: diags})
+		s.writeCompileError(w, name, src, err)
+
+		return
+	}
+
+	// 予約 uniform の型違いはコンパイルが通り、描いたときに panic する。書く前にゲームループで試し描きする。
+	// ループが止まっていて検査できなければ飛ばす（Install の処理でもう一度確かめるので、落ちるシェーダは入らない）
+	verr, qerr := call(s.cfg.Queue, s.cfg.Timeout, func(e *Engine) error { return e.validate(sh) })
+	if qerr == nil && verr != nil {
+		sh.Dispose()
+		s.writeCompileError(w, name, src, verr)
 
 		return
 	}
@@ -292,7 +299,11 @@ func (s *Server) putShader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = call(s.cfg.Queue, s.cfg.Timeout, func(e *Engine) bool { return e.Install(name, sh) })
+	installErr, err := call(s.cfg.Queue, s.cfg.Timeout, func(e *Engine) error {
+		_, err := e.InstallValidated(name, sh)
+
+		return err
+	})
 	if errors.Is(err, errNotQueued) {
 		sh.Dispose() // ファイルは書けているので、反映はファイル監視に委ねる
 	}
@@ -301,7 +312,22 @@ func (s *Server) putShader(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+	if installErr != nil {
+		// 書く前の検査を飛ばした（ループが遅れた）ときだけ来る。ファイルは書いてあるが Manager には入れていない
+		diags := Diagnose(src, installErr)
+		writeJSON(w, http.StatusUnprocessableEntity, errorBody{Error: "compile_error", Message: Summarize(diags), Diagnostics: diags})
+
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"name": name, "created": created})
+}
+
+// writeCompileError は PUT のコンパイル失敗（予約 uniform の型違いを含む）を 422 で返し、last_error に記録する。
+func (s *Server) writeCompileError(w http.ResponseWriter, name string, src []byte, err error) {
+	diags := Diagnose(src, err)
+	msg := Summarize(diags)
+	s.cfg.Queue.Post(func(e *Engine) { e.RecordError(name, msg) })
+	writeJSON(w, http.StatusUnprocessableEntity, errorBody{Error: "compile_error", Message: msg, Diagnostics: diags})
 }
 
 // checkLLMSlot は -llm-slots が有効なとき、name に PUT してよいかを判定する。

@@ -69,16 +69,32 @@ type previewRenderer struct {
 	pix   []byte
 }
 
-// drawPreviews は、要求が来ていて間隔も空いていれば、キー 1〜9 のシェーダーを描いて Submit する。
+// drawPreviews は、要求が来ていて間隔も空いていれば、キー 1〜9 のシェーダーを描いて読み出し、Submit する。
 // in は本番の uniform、screenW x screenH は画面の大きさ。
+// ReadPixels は積んである描画命令をすべて流して待つので、Draw の先頭（本番の描画を積む前）で呼ぶ。
 func (g *Game) drawPreviews(in uniform.Input, screenW, screenH int) {
 	if g.previews == nil || !g.previews.Due() {
 		return
 	}
+	slots := g.renderPreviewAtlas(in, screenW, screenH)
+
+	// GPU からの読み出しは 1 プレビューフレームにつき 1 回
+	g.preview.atlas.ReadPixels(g.preview.pix)
+	g.previews.Submit(g.preview.pix, slots)
+}
+
+// newUnmanagedImage は Ebitengine の内部のテクスチャアトラスに載せない w x h の画像を作る。
+func newUnmanagedImage(w, h int) *ebiten.Image {
+	return ebiten.NewImageWithOptions(image.Rect(0, 0, w, h), &ebiten.NewImageOptions{Unmanaged: true})
+}
+
+// renderPreviewAtlas はキー 1〜9 のシェーダーをセルに描いてアトラスへまとめ、キーの順のスロットを返す。
+// 描くと panic するシェーダー（予約 uniform の型違い）は描かず、そのキーを CompileError にする（jpeg は null になる）。
+func (g *Game) renderPreviewAtlas(in uniform.Input, screenW, screenH int) []control.PreviewSlot {
 	r := &g.preview
 	if r.atlas == nil {
 		r.uniforms = uniform.New()
-		r.atlas = ebiten.NewImage(control.PreviewAtlasSize, control.PreviewAtlasSize)
+		r.atlas = newUnmanagedImage(control.PreviewAtlasSize, control.PreviewAtlasSize)
 		r.pix = make([]byte, control.PreviewAtlasSize*control.PreviewAtlasSize*4)
 	}
 	r.atlas.Clear()
@@ -94,21 +110,20 @@ func (g *Game) drawPreviews(in uniform.Input, screenW, screenH int) {
 		}
 		cell := int(t.slot.Key[0] - '1')
 		if r.cells[cell] == nil {
-			r.cells[cell] = ebiten.NewImageWithOptions(
-				image.Rect(0, 0, control.PreviewSize, control.PreviewSize),
-				&ebiten.NewImageOptions{Unmanaged: true},
-			)
+			r.cells[cell] = newUnmanagedImage(control.PreviewSize, control.PreviewSize)
 		}
 		c := r.cells[cell]
 		c.Clear()
-		c.DrawRectShader(control.PreviewSize, control.PreviewSize, sh, &ebiten.DrawRectShaderOptions{Uniforms: uniforms})
+		if err := drawShaderSafe(c, control.PreviewSize, control.PreviewSize, sh, uniforms); err != nil {
+			slots[i].CompileError = true
+
+			continue
+		}
 
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Translate(float64(cell%control.PreviewCols*control.PreviewSize), float64(cell/control.PreviewCols*control.PreviewSize))
 		r.atlas.DrawImage(c, op)
 	}
 
-	// GPU からの読み出しは 1 プレビューフレームにつき 1 回
-	r.atlas.ReadPixels(r.pix)
-	g.previews.Submit(r.pix, slots)
+	return slots
 }

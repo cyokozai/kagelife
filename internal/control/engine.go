@@ -66,6 +66,11 @@ type Engine struct {
 	// PreviewSlots はキー 1〜9 に割り当たっているスロット（GET /v1/previews の keys）を返す。
 	// nil なら割り当て無し。
 	PreviewSlots func() []PreviewSlot
+	// Validate はコンパイル済みのシェーダを描いても落ちないか（予約 uniform の型違いが無いか）を確かめる。
+	// 描画を伴うのでゲームループの上で呼ぶ。nil なら検査しない。
+	Validate func(shadermgr.Shader) error
+	// NoPreviews は -previews=false。true なら features に previews を出さない（ServerConfig.Previews も nil にする）。
+	NoPreviews bool
 
 	lastErr *LastError
 }
@@ -205,6 +210,28 @@ func (e *Engine) Install(name string, sh shadermgr.Shader) bool {
 	e.lastErr = nil
 
 	return created
+}
+
+// validate は Validate で sh を確かめる。Validate が nil なら常に nil。
+func (e *Engine) validate(sh shadermgr.Shader) error {
+	if e.Validate == nil {
+		return nil
+	}
+
+	return e.Validate(sh)
+}
+
+// InstallValidated は sh を Validate で確かめてから Install する。通らなければ sh を Dispose し、
+// last_error に name で記録して error を返す（Manager には触れない）。
+func (e *Engine) InstallValidated(name string, sh shadermgr.Shader) (bool, error) {
+	if err := e.validate(sh); err != nil {
+		sh.Dispose()
+		e.RecordError(name, err.Error())
+
+		return false, err
+	}
+
+	return e.Install(name, sh), nil
 }
 
 // ReloadFile はファイル監視で変更を検知した path を src で再コンパイルし、
