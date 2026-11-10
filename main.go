@@ -484,6 +484,14 @@ func (g *Game) Update() error {
 		g.tapper.Tap(time.Now())
 	}
 
+	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
+		g.pressKey("[", false) // 制御口の POST /v1/keys と同じ処理
+	}
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyBracketRight) {
+		g.pressKey("]", false)
+	}
+
 	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
 		g.showHUD = !g.showHUD
 	}
@@ -506,7 +514,7 @@ func (g *Game) Update() error {
 
 // handleSlotKeys は数字キーでシェーダーを切り替える。数字は即時切替、Shift＋数字はクロスフェード。
 // -llm-slots 有りのときは 8・9 が予約名、0 が直前に映っていた予約名以外のシェーダーへの即時切替。
-// [ ] はプリセットの拍数を変える。処理は制御口の POST /v1/keys と同じ pressKey を通す。
+// 処理は制御口の POST /v1/keys と同じ pressKey を通す（[ ] は Update で同じく pressKey を呼ぶ）。
 func (g *Game) handleSlotKeys() {
 	// キーを処理する前に記録するので、予約名へ切り替えた直後も切替前のシェーダーが残る
 	g.observeBack()
@@ -522,25 +530,16 @@ func (g *Game) handleSlotKeys() {
 	if inpututil.IsKeyJustPressed(ebiten.Key0) {
 		g.pressKey("0", shift)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
-		g.pressKey("[", shift)
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyBracketRight) {
-		g.pressKey("]", shift)
-	}
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	g.frames.observe(time.Now())
 
-	sw, sh := screen.Bounds().Dx(), screen.Bounds().Dy()
-	in := g.frameInput(sw, sh, time.Now())
-	if shader, ok := g.sm.Active().(*ebiten.Shader); ok && shader != nil {
-		g.drawShaders(screen, shader, in)
-	}
+	shader, _ := g.sm.Active().(*ebiten.Shader)
+	in := g.drawShaders(screen, shader)
 
 	// プレビュー（GET /v1/previews）は本番と同じ uniform で描く。要求が無ければ何もしない
-	g.drawPreviews(in, sw, sh)
+	g.drawPreviews(in, screen.Bounds().Dx(), screen.Bounds().Dy())
 
 	if g.showHUD {
 		g.drawHUD(screen)
@@ -550,11 +549,28 @@ func (g *Game) Draw(screen *ebiten.Image) {
 // drawShaders はアクティブなシェーダー A を描き、フェード中なら B を画面外に描いてから重ねる。
 // -render-scale が 1 未満なら、A と B を画面 × S の画面外の画像に描き、線形補間で拡大して画面に出す。
 // 画面は既定で毎フレーム消去されるので、画面そのものに描くときは Clear しない。
-func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader, in uniform.Input) {
+// このフレームの uniform の値を返す（プレビューも同じ値で描く）。shader が nil なら何も描かずに値だけを返す。
+func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) uniform.Input {
 	sw, sh := screen.Bounds().Dx(), screen.Bounds().Dy()
 
 	// 制御口の state の resolution は画面の大きさのまま（契約を変えない）
 	g.eng.Resolution = [2]int{sw, sh}
+	now := time.Now()
+	in := shaderInput(frameParams{
+		ScreenW: sw,
+		ScreenH: sh,
+		Scale:   g.renderScale,
+		CursorX: g.cursorX,
+		CursorY: g.cursorY,
+		Elapsed: now.Sub(g.startAt),
+		Beat:    visualPhase(g.tapper, now, g.avOffset),
+		Frame:   g.frame,
+		Random:  rand.Float32(),
+	})
+
+	if shader == nil {
+		return in
+	}
 	uniforms := g.uniforms.Build(in)
 	w, h := in.Width, in.Height
 
@@ -587,21 +603,8 @@ func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader, in unifo
 		op.GeoM.Scale(float64(sw)/float64(w), float64(sh)/float64(h))
 		screen.DrawImage(target, op)
 	}
-}
 
-// frameInput は画面 sw x sh・時刻 now のフレームの uniform を組み立てる（本番とプレビューで共有する）。
-func (g *Game) frameInput(sw, sh int, now time.Time) uniform.Input {
-	return shaderInput(frameParams{
-		ScreenW: sw,
-		ScreenH: sh,
-		Scale:   g.renderScale,
-		CursorX: g.cursorX,
-		CursorY: g.cursorY,
-		Elapsed: now.Sub(g.startAt),
-		Beat:    visualPhase(g.tapper, now, g.avOffset),
-		Frame:   g.frame,
-		Random:  rand.Float32(),
-	})
+	return in
 }
 
 // offscreenFor は w x h の画面外の画像（クロスフェードの B 側）を返す。
