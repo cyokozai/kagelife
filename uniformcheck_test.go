@@ -28,7 +28,7 @@ func mustNewShader(t *testing.T, src string) *ebiten.Shader {
 	if err != nil {
 		t.Fatalf("NewShader: %v", err)
 	}
-	t.Cleanup(sh.Dispose)
+	t.Cleanup(sh.Deallocate)
 
 	return sh
 }

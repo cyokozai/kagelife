@@ -56,7 +56,7 @@ func checkedCompiler(src []byte) (shadermgr.Shader, error) {
 		return nil, err
 	}
 	if err := validateShader(sh); err != nil {
-		sh.Dispose()
+		sh.Deallocate()
 
 		return nil, err
 	}
