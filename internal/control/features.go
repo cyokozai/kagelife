@@ -7,7 +7,9 @@ import "sort"
 //
 //   - llm_slots: -llm-slots の予約名（state の llm_slots、PUT の 403 forbidden_name / 409 slot_live）。
 //     このビルドが機能を持つことだけを示す。設定済みかは state の llm_slots が空かで見る。
-var features = []string{"llm_slots"}
+//   - keys: POST /v1/keys（GUI のキーボードの数字・[・] を押したのと同じ処理。Stream Deck 用）。
+//   - previews: GET /v1/previews（数字キー 1〜9 のシェーダの小さな動くデモ。Stream Deck 用）。
+var features = []string{"keys", "llm_slots", "previews"}
 
 // Features は features をソートした複製を返す。空でも nil ではなく空のスライスを返す。
 func Features() []string {

@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -131,6 +132,9 @@ func NewGame(shaderDir string, queue *control.Queue, llmSlots []string) (*Game, 
 		FPS:       ebiten.ActualFPS,
 		LLMSlots:  llmSlots,
 	}
+	// 制御口の POST /v1/keys と GET /v1/previews は、キーボードと同じ数字キーの対応を使う
+	g.eng.PressKey = g.pressControlKey
+	g.eng.PreviewSlots = g.previewSlots
 
 	w, err := newShaderWatcher(shaderDir)
 	if err != nil {
@@ -475,14 +479,6 @@ func (g *Game) Update() error {
 		g.tapper.Tap(time.Now())
 	}
 
-	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
-		g.sm.DecFadeBeats()
-	}
-
-	if inpututil.IsKeyJustPressed(ebiten.KeyBracketRight) {
-		g.sm.IncFadeBeats()
-	}
-
 	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
 		g.showHUD = !g.showHUD
 	}
@@ -505,31 +501,27 @@ func (g *Game) Update() error {
 
 // handleSlotKeys は数字キーでシェーダーを切り替える。数字は即時切替、Shift＋数字はクロスフェード。
 // -llm-slots 有りのときは 8・9 が予約名、0 が直前に映っていた予約名以外のシェーダーへの即時切替。
+// [ ] はプリセットの拍数を変える。処理は制御口の POST /v1/keys と同じ pressKey を通す。
 func (g *Game) handleSlotKeys() {
-	paths := g.sm.Names()
-	if len(g.llmSlots) > 0 {
-		// キーを処理する前に記録するので、予約名へ切り替えた直後も切替前のシェーダーが残る
-		g.back.observe(paths, g.llmSlots, g.sm.ActiveIndex(), g.sm.Fading(), g.sm.FadeTargetIndex())
-	}
+	// キーを処理する前に記録するので、予約名へ切り替えた直後も切替前のシェーダーが残る
+	g.observeBack()
 
 	shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) ||
 		ebiten.IsKeyPressed(ebiten.KeyShiftRight)
 
-	for k, idx := range keySlots(paths, g.llmSlots) {
-		if idx < 0 || !inpututil.IsKeyJustPressed(ebiten.Key1+ebiten.Key(k)) {
-			continue
-		}
-		if shift {
-			g.sm.BeginFade(idx)
-		} else {
-			g.sm.Switch(idx)
+	for k := range numKeys {
+		if inpututil.IsKeyJustPressed(ebiten.Key1 + ebiten.Key(k)) {
+			g.pressKey(strconv.Itoa(k+1), shift)
 		}
 	}
-
-	if len(g.llmSlots) > 0 && inpututil.IsKeyJustPressed(ebiten.Key0) {
-		if i := g.back.target(paths, g.llmSlots, g.sm.Usable); i >= 0 {
-			g.sm.Switch(i)
-		}
+	if inpututil.IsKeyJustPressed(ebiten.Key0) {
+		g.pressKey("0", shift)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
+		g.pressKey("[", shift)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyBracketRight) {
+		g.pressKey("]", shift)
 	}
 }
 

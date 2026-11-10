@@ -66,6 +66,7 @@ func NewServer(cfg ServerConfig) *Server {
 	s.route("/v1/switch", map[string]http.HandlerFunc{http.MethodPost: s.postSwitch})
 	s.route("/v1/crossfade", map[string]http.HandlerFunc{http.MethodPost: s.postCrossfade})
 	s.route("/v1/bpm", map[string]http.HandlerFunc{http.MethodPost: s.postBPM})
+	s.route("/v1/keys", map[string]http.HandlerFunc{http.MethodPost: s.postKeys})
 
 	return s
 }

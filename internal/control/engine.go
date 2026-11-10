@@ -59,6 +59,13 @@ type Engine struct {
 	Resolution [2]int
 	// LLMSlots は -llm-slots の予約名（nil なら無効）。ServerConfig.LLMSlots と同じものを渡す。
 	LLMSlots []string
+	// PressKey は GUI のキーボードで key を押したのと同じ処理をする（POST /v1/keys）。
+	// key は validKey を通ったもの、shift は Shift を押しながらかどうか。
+	// キーに割り当てが無ければ何もせず false を返す。nil ならどのキーも割り当て無し。
+	PressKey func(key string, shift bool) bool
+	// PreviewSlots はキー 1〜9 に割り当たっているスロット（GET /v1/previews の keys）を返す。
+	// nil なら割り当て無し。
+	PreviewSlots func() []PreviewSlot
 
 	lastErr *LastError
 }
@@ -175,6 +182,15 @@ func (e *Engine) Crossfade(name string, beats float64) (float64, error) {
 	}
 
 	return beats, nil
+}
+
+// Key は GUI のキーボードで key を押したのと同じ処理をする。割り当てが無ければ ErrNotFound。
+func (e *Engine) Key(key string, shift bool) error {
+	if e.PressKey == nil || !e.PressKey(key, shift) {
+		return ErrNotFound
+	}
+
+	return nil
 }
 
 // SetBPM は BPM を直接設定し、今を拍頭にする。範囲（40〜300）の検査は呼び出し側（postBPM）で行う。
