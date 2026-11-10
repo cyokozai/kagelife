@@ -361,6 +361,8 @@ type options struct {
 	fullscreen bool
 	// renderScale は -render-scale（シェーダーを描く解像度の倍率。1.0 は画面のまま）。
 	renderScale float64
+	// previews は -previews（GET /v1/previews。false なら描かず、404 にし、features に出さない）。
+	previews bool
 }
 
 // parseFlags は args（プログラム名を除く）を解釈する。エラーと使い方は標準エラーに出す。
@@ -411,6 +413,8 @@ func parseFlagsTo(args []string, out io.Writer) (options, error) {
 
 			return err
 		})
+	fs.BoolVar(&opts.previews, "previews", true,
+		"制御口の GET /v1/previews（Stream Deck のキーに出す数字キーのシェーダの動くデモ）を有効にする。false なら描かない")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -761,6 +765,10 @@ func run(opts options) error {
 	}
 	if g.avOffset != 0 {
 		log.Printf("av-offset: %dms (Beat only)", g.avOffset.Milliseconds())
+	}
+	if !opts.previews {
+		g.disablePreviews()
+		log.Print("previews: disabled (GET /v1/previews returns 404)")
 	}
 
 	ctl, err := control.Start(control.Config{

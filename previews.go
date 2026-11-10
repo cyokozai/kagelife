@@ -69,6 +69,13 @@ type previewRenderer struct {
 	pix   []byte
 }
 
+// disablePreviews は -previews=false の処理。描く側の状態を外し、制御口の features から previews を消す。
+// 制御口には g.previews（nil）を渡すので、GET /v1/previews は 404 になる。
+func (g *Game) disablePreviews() {
+	g.previews = nil
+	g.eng.NoPreviews = true
+}
+
 // drawPreviews は、要求が来ていて間隔も空いていれば、キー 1〜9 のシェーダーを描いて読み出し、Submit する。
 // in は本番の uniform、screenW x screenH は画面の大きさ。
 // ReadPixels は積んである描画命令をすべて流して待つので、Draw の先頭（本番の描画を積む前）で呼ぶ。

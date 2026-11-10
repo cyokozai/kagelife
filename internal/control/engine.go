@@ -116,7 +116,7 @@ func (e *Engine) State() State {
 			Mix:    float64(e.SM.MixRatio()),
 			Beats:  float64(e.SM.CurrentFadeBeats()),
 		},
-		Features: Features(),
+		Features: e.features(),
 		LLMSlots: append([]string{}, e.LLMSlots...),
 	}
 	if e.SM.Len() > 0 {

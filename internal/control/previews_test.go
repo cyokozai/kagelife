@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"image/jpeg"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -268,6 +269,35 @@ func TestPreviews_StaleFrameIsNotReturnedAfterStop(t *testing.T) {
 	}
 	if body["frame"] != 1.0 {
 		t.Errorf("frame = %v, want 1（戻さない）", body["frame"])
+	}
+}
+
+// -previews=false（ServerConfig.Previews が nil、Engine.NoPreviews）なら、GET /v1/previews は 404 で、
+// features に previews を出さない。keys は止めない。
+func TestPreviews_Disabled(t *testing.T) {
+	dir := t.TempDir()
+	eng := newTestEngine(dir, "a")
+	eng.NoPreviews = true
+	fk := &fakeKeys{assigned: map[string]bool{"1": true}}
+	eng.PressKey = fk.press
+	q := NewQueue(16)
+	h := &harness{t: t, dir: dir, eng: eng, q: q, comp: &fakeCompiler{}}
+	h.srv = httptest.NewServer(NewServer(ServerConfig{Token: testToken, ShaderDir: dir, Compile: h.comp.compile, Queue: q, Timeout: 100 * time.Millisecond}))
+	h.stop = runLoop(q, eng)
+	t.Cleanup(func() {
+		h.srv.Close()
+		h.stop()
+	})
+
+	st, body := h.do("GET", "/v1/previews", "")
+	assertError(t, st, body, 404, "not_found")
+
+	_, s := h.do("GET", "/v1/state", "")
+	if got, want := jsonBody(s["features"]), `["keys","llm_slots"]`; got != want {
+		t.Errorf("features = %s, want %s", got, want)
+	}
+	if st, _ := h.do("POST", "/v1/keys", `{"key":"1"}`); st != 200 {
+		t.Errorf("keys: status = %d, want 200", st)
 	}
 }
 

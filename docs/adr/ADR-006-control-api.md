@@ -109,7 +109,7 @@ BPM は常に 40〜300 で 0 にならないため、BPM を理由に失敗す�
 body `{"bpm":128}` → 40〜300 以外は 400 `invalid_bpm`。200 `{"bpm":128.0}`。
 範囲はタップ BPM の制限と同じ（[ADR-008](ADR-008-crossfade-compositing.md) D3）。タップ BPM と共存する。以後のタップで上書きされてよい
 
-### Stream Deck 用の任意機能（2026-11-11 追加。補足 27〜31）
+### Stream Deck 用の任意機能（2026-11-11 追加。補足 27〜33）
 
 同じ機械に挿した Stream Deck MK.2（キー画像 72×72）の常駐アプリ（別リポジトリ `cyokozai/kagelife-deck`）から使う 2 つの任意機能。
 どちらも `features` に名前を出し（補足 27）、発見ファイルの `version` は 1 のまま。
@@ -125,6 +125,7 @@ body `{"bpm":128}` → 40〜300 以外は 400 `invalid_bpm`。200 `{"bpm":128.0}
 - `jpeg` は 72×72 の JPEG（品質 80）の base64。まだ描いていないとき、コンパイルに失敗したスロットでは null。`compile_error` はその 2 つを区別する
 - `frame` はプレビューを描くたびに 1 増える。起動直後は 0
 - 描く条件と最初の要求の扱いは補足 28、描く中身は補足 29
+- GUI を `-previews=false` で起動すると 404 `not_found`（未定義パスと同じ）で、`features` に `previews` を出さない（補足 32）
 
 #### POST /v1/keys（feature `keys`）
 body `{"key":"1","shift":false}`（`shift` は省略可、既定 false）→ 200 `{"key":"1"}`。
@@ -133,7 +134,7 @@ body `{"key":"1","shift":false}`（`shift` は省略可、既定 false）→ 200
 - 判定順は 本文 400 `invalid_request`（不正な JSON・`key` の欠落・型違い・未知のフィールド）→ 400 `invalid_key` → 404 `not_found`
 - 挙動は補足 30
 
-27. **`features` の `keys`・`previews`**: `features` は `["keys","llm_slots","previews"]` を返す（名前順）。どちらもこのビルドが機能を持つことだけを示し、起動時のフラグでは変わらない
+27. **`features` の `keys`・`previews`**: `features` は `["keys","llm_slots","previews"]` を返す（名前順）。`keys` はこのビルドが機能を持つことだけを示し、起動時のフラグでは変わらない。`previews` は `-previews=false` のときだけ出さない（補足 32）
 28. **プレビューを描く条件**: GUI は、直近 2 秒以内に `GET /v1/previews` が来ているときだけプレビューを描く。来ていなければ GPU も CPU も追加で使わない。描く頻度は最大 10 fps
     - 止まっている状態（起動直後、または 2 秒以上要求が無かった）からの最初の要求は、ゲームループから今の割り当てを読み、`jpeg` をすべて null にして即答する。前に描いた古い絵は返さない。この要求で描き始める。ゲームループが止まっていれば 503 `loop_timeout`
     - 描いている間の要求は、最新の完成したフレームをそのまま返す（ゲームループを待たない）
@@ -147,7 +148,12 @@ body `{"key":"1","shift":false}`（`shift` は省略可、既定 false）→ 200
     - キー 0（`-llm-slots` 有りのときだけ）は直前に映っていた予約名以外のシェーダへの即時切替。戻り先は、その要求を処理する時点の表示も含めて記録してから選ぶ（キーボードと同じく、押す直前の表示を記録する）。`shift` は見ない
     - `[` `]` はプリセットの拍数を 1 段変える。`shift` は見ない
     - 割り当てはあるがコンパイルに失敗したスロットのキーは、キーボードと同じく何もしないで 200 を返す。戻り先が無いときのキー 0 も同じ。実際に切り替わったかは `GET /v1/state` で確かめる
-31. **実装の注記（契約ではない）**: 9 個を 1 枚の 216×216 のアトラスに描き、GPU からの読み出しは 1 プレビューフレームにつき 1 回。JPEG の符号化はゲームループの外（別 goroutine）で行い、符号化が終わるまで次のプレビューを描かない。セルの画像は Ebitengine の内部のテクスチャアトラスに載せない（`Unmanaged`）。載せると `dstPos` に詰めた位置が足され、`dstPos / Resolution` で座標を出すシェーダの絵がずれる
+31. **実装の注記（契約ではない）**: 9 個を 1 枚の 216×216 のアトラスに描き、GPU からの読み出しは 1 プレビューフレームにつき 1 回。読み出し（`ReadPixels`）は積んである描画命令をすべて流して待つので、Draw の中で本番の描画を積む前に行う。JPEG の符号化はゲームループの外（別 goroutine）で行い、符号化が終わるまで次のプレビューを描かない。セルとアトラスの画像は Ebitengine の内部のテクスチャアトラスに載せない（`Unmanaged`）。載せると `dstPos` に詰めた位置が足され、`dstPos / Resolution` で座標を出すシェーダの絵がずれる
+32. **`-previews` フラグ**: GUI の `-previews`（既定 true）を false にすると、プレビューを描かず、`GET /v1/previews` は 404 `not_found`、`features` に `previews` を出さない。デッキは `features` を見て、キーの表示を文字に戻す。`keys` は止めない（`-previews=false` でも `POST /v1/keys` は使える）
+33. **予約 uniform の型違い**: 予約 uniform の名前で型の違う宣言（例: `var Time vec2`、`var Resolution vec3`）は Kage のコンパイルを通るが、Ebitengine は描くときに panic する。GUI はこれを描く前に弾き、コンパイル失敗と同じに扱う。型は `Time`・`Beat`・`Random` が float、`Frame` が int、`Resolution`・`Cursor` が vec2
+    - ファイル監視の読み込み・再読込: 1×1 に試し描きして panic すれば、コンパイル失敗と同じ（旧シェーダのまま、新しいファイルは nil のスロット、`last_error` に記録）。`message` に uniform の型が合わないことを書く
+    - PUT: コンパイルの後、書く前にゲームループで試し描きする。型違いなら 422 `compile_error`（ファイルにも Manager にも触れない。`diagnostics` は位置不明として line 0 / col 0 の 1 件）。このため PUT はゲームループを 1 回多く待つ（`-llm-slots` 付きなら最大 4 回）。ループが止まっていて試し描きできなければ飛ばして書き、差し替えの処理でもう一度確かめる（そこで型違いなら 422 で、ファイルは書いてあるが Manager には入らない。ファイル監視の再読込でもコンパイル失敗になる）
+    - プレビュー: それでも描くときに panic したキーは、そのキーだけ `compile_error: true`・`jpeg: null` にして、他のキーは描き続ける
 
 ### v1 の範囲外（後続 PR）
 - `GET /v1/capture?max_width=1024&format=png|jpeg`（feat/mcp-capture-frame）

@@ -29,8 +29,10 @@ func TestPutShader_ValidateRejects(t *testing.T) {
 	st, body := h.do("PUT", "/v1/shaders/bad", jsonBody(map[string]string{"source": src("// UNIFORM_FAIL")}))
 
 	assertError(t, st, body, 422, "compile_error")
-	if d, _ := body["diagnostics"].([]any); len(d) == 0 {
-		t.Errorf("diagnostics が空: %v", body)
+	if d, _ := body["diagnostics"].([]any); len(d) != 1 {
+		t.Errorf("diagnostics = %v, want 1 件", body["diagnostics"])
+	} else if d0, _ := d[0].(map[string]any); d0["line"] != 0.0 || d0["col"] != 0.0 {
+		t.Errorf("diagnostics[0] = %v, want line 0 / col 0（位置不明）", d0)
 	}
 	if msg, _ := body["message"].(string); !strings.Contains(msg, "uniform") {
 		t.Errorf("message = %q, want it to mention uniform", msg)

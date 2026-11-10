@@ -55,6 +55,37 @@ func TestRenderPreviewAtlas_UniformMismatchDoesNotPanic(t *testing.T) {
 	}
 }
 
+// -previews は既定で true、-previews=false で止める。
+func TestParseFlags_Previews(t *testing.T) {
+	opts, err := parseFlags(nil)
+	if err != nil || !opts.previews {
+		t.Fatalf("既定: previews=%v err=%v, want true", opts.previews, err)
+	}
+	opts, err = parseFlags([]string{"-previews=false"})
+	if err != nil || opts.previews {
+		t.Fatalf("-previews=false: previews=%v err=%v, want false", opts.previews, err)
+	}
+}
+
+// disablePreviews は描く側の状態を外し、Engine に機能が無いことを伝える（state の features から previews が消える）。
+func TestDisablePreviews(t *testing.T) {
+	g := newKeysTestGame(t, nil, "a")
+	g.previews = control.NewPreviews()
+	g.eng = &control.Engine{SM: g.sm, Tapper: g.tapper}
+
+	g.disablePreviews()
+
+	if g.previews != nil {
+		t.Error("previews が残っている")
+	}
+	for _, f := range g.eng.State().Features {
+		if f == "previews" {
+			t.Errorf("features = %v, want no previews", g.eng.State().Features)
+		}
+	}
+	g.drawPreviews(uniform.Input{}, 640, 480) // nil でも落ちない
+}
+
 // previewTargets はキー 1〜9 の順に、割り当たったスロットの位置とプレビューの名前を返す（keySlots と同じ対応）。
 func TestPreviewTargets(t *testing.T) {
 	g := newKeysTestGame(t, []string{"llm_a", "llm_b"}, "a", "b_FAIL", "llm_a", "llm_b", "z")
