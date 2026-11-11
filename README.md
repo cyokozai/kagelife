@@ -1,8 +1,16 @@
 # KageLife
 
-KageLife は，Ebitengine の Kage シェーダーを保存するだけで画面にリアルタイム反映する，Go 製の VJ ライブコーディングツールです．
+KageLife は，[Ebitengine](https://ebitengine.org/ja/) の Kage シェーダーを保存するだけで画面にリアルタイム反映する，Go 製の VJ ライブコーディングツールです．
 好きなエディタで `shaders/` 以下の `.kage` を書き換えて保存すると，自動で再コンパイルして描画を差し替えます．
 `Time` や `Beat` などの Uniform は自動で注入され，数字キーでのシェーダー切り替え，タップテンポに同期したクロスフェードでパフォーマンスできます．
+
+---
+
+## 関連リポジトリ
+
+- [cyokozai/kagelife-mcp](https://github.com/cyokozai/kagelife-mcp): MCP の stdio サーバ．LLM からのツール呼び出しを，KageLife の[制御口](#制御口mcp-連携)へ中継します．
+- [cyokozai/kagelife-deck](https://github.com/cyokozai/kagelife-deck): Stream Deck MK.2 から KageLife を操作する常駐アプリ（Linux）．制御口の `GET /v1/previews` と `POST /v1/keys` を使います．
+- [cyokozai/kagelife-shaders](https://github.com/cyokozai/kagelife-shaders): VJ 素材の Kage シェーダー集．1 フォルダ = 1 プリセットで，そのフォルダを `-shaders` に渡して読みます．
 
 ---
 
@@ -322,6 +330,7 @@ LLM などの外部のプログラムは，この制御口を通して状態の�
 - 契約（エンドポイント・認証・エラー）は [ADR-006](docs/adr/ADR-006-control-api.md) を正典とします．
 - `GET /v1/state` の `last_error` には，PUT とファイル監視で起きた失敗のうち最新の 1 件が入ります．起動時の読み込みで失敗したファイルは入らず，HUD とログにだけ出ます．
 - MCP の stdio サーバは別リポジトリ [cyokozai/kagelife-mcp](https://github.com/cyokozai/kagelife-mcp) にあり，この制御口へ中継します．
+- Stream Deck から操作する常駐アプリは別リポジトリ [cyokozai/kagelife-deck](https://github.com/cyokozai/kagelife-deck) にあり，この制御口の `GET /v1/previews` と `POST /v1/keys` を使います．
 
 ---
 
