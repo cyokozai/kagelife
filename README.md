@@ -26,7 +26,7 @@ KageLife は，Ebitengine の Kage シェーダーを保存するだけで画面
 置き場所を作り，使う環境の `tar.gz` と，同じリリースにある `SHA256SUMS` を同じディレクトリに落とします．
 
 ```bash
-VERSION=v0.1.0
+VERSION=v0.2.0
 ASSET=kagelife-$VERSION-darwin-arm64
 mkdir -p ~/Applications/kagelife && cd ~/Applications/kagelife
 ```

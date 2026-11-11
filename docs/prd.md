@@ -19,6 +19,7 @@
 | 0.7 | 2026-11-08 | FR-013 を実装（`internal/tempo/tapper.go` の `Phase`）と FR-032・ADR-008 D3 に合わせた。タップ前も `Beat` は 0 ではなく既定の 120 BPM で刻む（README の `Beat` の説明と同じ意味）。PR #7 のレビューの指摘による |
 | 0.8 | 2026-11-08 | FR-013 に、制御口の set_bpm（FR-115）が拍頭とタップ履歴も変えることと、1 回目のタップは拍頭を合わせ直すだけで BPM は 2 回目のタップまで直前の値を保つことを書き足した（`internal/tempo/tapper.go` の `Tap`・`SetBPM`・`Phase` に合わせた。README の `Beat` の説明も同じ意味に揃えた）。PR #40 のレビューの指摘による |
 | 0.9 | 2026-11-09 | FR-013 に `-link`（Carabiner 経由の Ableton Link）で同期中の扱いを書き足した。同期中は BPM と拍頭を Link から取り、タップと set_bpm（FR-115）は次のフレームで Link の値に戻る。切れたら直前の Link の BPM と拍頭を引き継いでタップに戻る。将来フェーズの Ableton Link の受信を前倒しした |
+| 0.9（版は据え置き） | 2026-11-11 | Out of Scope の「Ableton Link / MIDI連携」を FR-013 に合わせ、除外を MIDI 連携だけにした（Ableton Link の受信は Carabiner 経由で前倒し済み）。PR #47 のレビューの指摘による |
 
 ---
 
@@ -122,7 +123,7 @@ LLM が曲に合わせて自分から演出を変える。前提の A〜D を先
 
 - シェーダー重ね合わせ（V2: DrawRectShader複数パス設計が必要。v1.0 のクロスフェードは 2 枚の遷移に限る）
 - GUIパラメータUI（V2: ImGui/tview統合コスト高）
-- Ableton Link / MIDI連携（V2: Go実装が少ない）
+- MIDI連携（V2: Go実装が少ない）。Ableton Link の受信は Carabiner 経由で前倒しした（FR-013）
 - WASM対応（V2: ホットリロードと根本的に相性が悪い）
 - 頂点シェーダー（Kageの仕様上フラグメントシェーダのみ）
 - （v1.0）カスタムUniform。定義方式は Q-001 のとおり MCP 段階 2 の set_uniform（FR-130）で決める
