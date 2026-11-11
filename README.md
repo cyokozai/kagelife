@@ -1,8 +1,12 @@
 # KageLife
 
-KageLife は，Ebitengine の Kage シェーダーを保存するだけで画面にリアルタイム反映する，Go 製の VJ ライブコーディングツールです．
+KageLife は，[Ebitengine](https://ebitengine.org/ja/) の Kage シェーダーを保存するだけで画面にリアルタイム反映する，Go 製の VJ ライブコーディングツールです．
 好きなエディタで `shaders/` 以下の `.kage` を書き換えて保存すると，自動で再コンパイルして描画を差し替えます．
 `Time` や `Beat` などの Uniform は自動で注入され，数字キーでのシェーダー切り替え，タップテンポに同期したクロスフェードでパフォーマンスできます．
+
+> **名前について**: 「Kage」は Ebitengine のシェーダー言語の名前です．
+> KageLife という名前は，Hexler Limited のシェーダーのライブコーディング環境 [KodeLife](https://hexler.net/kodelife) への敬意から付けました．
+> KageLife は KodeLife および Hexler Limited とは関係のない，非公式で独立したプロジェクトです．
 
 ---
 
@@ -510,6 +514,14 @@ Refs: #
 | A: 説明責任者 (Accountable) | 成果物に対して最終責任を持つ人 |
 | C: 協業先 (Consulted) | 作業に際して相談・協力を求める人 |
 | I: 報告先 (Informed) | 進捗・完了を報告する人 |
+
+---
+
+## 関連リポジトリ
+
+- [cyokozai/kagelife-mcp](https://github.com/cyokozai/kagelife-mcp): LLM（Claude Code など）から KageLife を操作するための stdio MCP サーバです．起動中の KageLife の制御口へ中継します．
+- [cyokozai/kagelife-deck](https://github.com/cyokozai/kagelife-deck): Stream Deck MK.2 から KageLife の制御口 v1 を操作する常駐アプリです（Linux）．
+- [cyokozai/kagelife-shaders](https://github.com/cyokozai/kagelife-shaders): KageLife で読み込む Kage シェーダーのプリセット集です．
 
 ---
 
