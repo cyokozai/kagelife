@@ -1,16 +1,19 @@
 # KageLife
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/kagelife-icon-dark.svg">
+    <img src="assets/logo/kagelife-icon-light.svg" alt="KageLife のロゴ" width="160">
+  </picture>
+</p>
+
 KageLife は，[Ebitengine](https://ebitengine.org/ja/) の Kage シェーダーを保存するだけで画面にリアルタイム反映する，Go 製の VJ ライブコーディングツールです．
 好きなエディタで `shaders/` 以下の `.kage` を書き換えて保存すると，自動で再コンパイルして描画を差し替えます．
 `Time` や `Beat` などの Uniform は自動で注入され，数字キーでのシェーダー切り替え，タップテンポに同期したクロスフェードでパフォーマンスできます．
 
----
-
-## 関連リポジトリ
-
-- [cyokozai/kagelife-mcp](https://github.com/cyokozai/kagelife-mcp): MCP の stdio サーバ．LLM からのツール呼び出しを，KageLife の[制御口](#制御口mcp-連携)へ中継します．
-- [cyokozai/kagelife-deck](https://github.com/cyokozai/kagelife-deck): Stream Deck MK.2 から KageLife を操作する常駐アプリ（Linux）．制御口の `GET /v1/previews` と `POST /v1/keys` を使います．
-- [cyokozai/kagelife-shaders](https://github.com/cyokozai/kagelife-shaders): VJ 素材の Kage シェーダー集．1 フォルダ = 1 プリセットで，そのフォルダを `-shaders` に渡して読みます．
+> **名前について**: 「Kage」は Ebitengine のシェーダー言語の名前です．
+> KageLife という名前は，Hexler Limited のシェーダーのライブコーディング環境 [KodeLife](https://hexler.net/kodelife) への敬意から付けました．
+> KageLife は KodeLife および Hexler Limited とは関係のない，非公式で独立したプロジェクトです．
 
 ---
 
@@ -34,7 +37,7 @@ KageLife は，[Ebitengine](https://ebitengine.org/ja/) の Kage シェーダー
 置き場所を作り，使う環境の `tar.gz` と，同じリリースにある `SHA256SUMS` を同じディレクトリに落とします．
 
 ```bash
-VERSION=v0.1.0
+VERSION=v0.2.0
 ASSET=kagelife-$VERSION-darwin-arm64
 mkdir -p ~/Applications/kagelife && cd ~/Applications/kagelife
 ```
@@ -519,6 +522,14 @@ Refs: #
 | A: 説明責任者 (Accountable) | 成果物に対して最終責任を持つ人 |
 | C: 協業先 (Consulted) | 作業に際して相談・協力を求める人 |
 | I: 報告先 (Informed) | 進捗・完了を報告する人 |
+
+---
+
+## 関連リポジトリ
+
+- [cyokozai/kagelife-mcp](https://github.com/cyokozai/kagelife-mcp): LLM（Claude Code など）から KageLife を操作するための stdio MCP サーバです．起動中の KageLife の制御口へ中継します．
+- [cyokozai/kagelife-deck](https://github.com/cyokozai/kagelife-deck): Stream Deck MK.2 から KageLife の制御口 v1 を操作する常駐アプリです（Linux）．
+- [cyokozai/kagelife-shaders](https://github.com/cyokozai/kagelife-shaders): KageLife で読み込む Kage シェーダーのプリセット集です．
 
 ---
 
