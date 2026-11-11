@@ -465,3 +465,23 @@ func TestRemove_SkipsNilNeighbor(t *testing.T) {
 		})
 	}
 }
+
+// ShaderAt はスロット i のシェーダーを返す。範囲外と nil のスロットは nil。
+// 差し替えた後は新しいシェーダーを返す（プレビューが古いシェーダーを描かないため）。
+func TestShaderAt(t *testing.T) {
+	m := newManagerWith(t, "s/a.kage", "s/c.kage")
+	mustFail(t, m, "s/b.kage")
+
+	if got := shaderName(m.ShaderAt(0)); got != "s/a.kage" {
+		t.Errorf("ShaderAt(0) = %q, want s/a.kage", got)
+	}
+	for _, i := range []int{-1, 1, 3} {
+		if got := m.ShaderAt(i); got != nil {
+			t.Errorf("ShaderAt(%d) = %v, want nil", i, got)
+		}
+	}
+	mustReload(t, m, "s/c.kage", []byte("s/c2"))
+	if got := shaderName(m.ShaderAt(2)); got != "s/c2" {
+		t.Errorf("差し替え後の ShaderAt(2) = %q, want s/c2", got)
+	}
+}

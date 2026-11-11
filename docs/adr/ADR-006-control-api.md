@@ -1,7 +1,7 @@
 # ADR-006: 制御口 v1 の契約 — localhost HTTP/JSON ＋ Update キュー
 
 **ステータス**: Accepted
-**日付**: 2026-09-30（改訂: 2026-10-01。BPM の扱いを ADR-008 D3 に合わせた。PRD Q-008／2026-10-02。制御口 v1 の実装（PR #24）に合わせ、補足 14 の理由を直し、補足 16〜18（コンパイルに失敗したファイル、フェード中の再指示、`last_error.message` の形）を追加した／2026-10-22。#24 のマージ前に入れる補足 19・20（未知のフィールドの拒否、`features`）を追加した。2026-10-19 の決定、PRD v0.5 FR-140・FR-141）
+**日付**: 2026-09-30（改訂: 2026-10-01。BPM の扱いを ADR-008 D3 に合わせた。PRD Q-008／2026-10-02。制御口 v1 の実装（PR #24）に合わせ、補足 14 の理由を直し、補足 16〜18（コンパイルに失敗したファイル、フェード中の再指示、`last_error.message` の形）を追加した／2026-10-22。#24 のマージ前に入れる補足 19・20（未知のフィールドの拒否、`features`）を追加した。2026-10-19 の決定、PRD v0.5 FR-140・FR-141）／2026-11-09。マージ済みの LLM 背景スロット（PR #33、`-llm-slots`）に合わせ、state の `llm_slots`、`features` の `llm_slots`、PUT の 403 `forbidden_name`・409 `slot_live` と判定の順を書き足し、補足 21〜26 を追加した。補足 20 の「v1 の時点では空配列」を改めた）
 **決定者**: cyokozai
 **関連**: ADR-002（fsnotify + buffered channel）、ADR-005（プロセス構成）、[ADR-008](ADR-008-crossfade-compositing.md)（クロスフェードと BPM の既定値・制限）、assumptions-20260930 #4 #5 #10
 
@@ -70,12 +70,13 @@ kagelife の feat/mcp-control-api（GUI 側）と kagelife-mcp の feat/mcp-stdi
 {"active":"01_uv","shaders":["01_uv","02_time_sin"],"bpm":120.0,"bpm_measured":false,
  "fade":{"fading":false,"target":"","mix":0.0,"beats":4.0},
  "fps":59.9,"resolution":[1280,720],
- "last_error":null,"features":[]}
+ "last_error":null,"features":["keys","llm_slots","previews"],"llm_slots":[]}
 ```
 `last_error` は `{"shader":"x","message":"..."}` または null（ファイル監視経由のコンパイル失敗も含む最新のもの。寿命は補足 8、`message` の形は経路で異なる: 補足 18）。`active` はシェーダ 0 本なら `""`。
 `shaders` はファイル名順で、コンパイルに失敗したファイルも含む（補足 16）。
 `bpm` は常に 40〜300 で、0（未設定）にはならない。タップ前は既定の 120（[ADR-008](ADR-008-crossfade-compositing.md) D3）。`bpm_measured` は、`bpm` が既定値のままなら false、タップまたは `POST /v1/bpm` で設定された値なら true（`tempo.Tapper.Measured()` に当たる）。
-`features` は常に配列で、GUI が持つ任意機能の snake_case の名前を並べる。v1 の時点では空配列（補足 20）。
+`features` は常に配列で、GUI が持つ任意機能の snake_case の名前を並べる（補足 20）。今は `["keys","llm_slots","previews"]`（名前順）で、`-llm-slots` を付けずに起動しても同じ（ビルドが機能を持つことだけを示す。補足 21・27）。`-previews=false` のときだけ `previews` を出さない（補足 32）。
+`llm_slots` は `-llm-slots` の予約名をフラグの順に並べた配列で、フラグ無しなら `[]`（null にしない。補足 22）。
 
 #### GET /v1/shaders/{name}
 200 `{"name":"x","source":"..."}` / 404 `not_found`
@@ -83,15 +84,17 @@ kagelife の feat/mcp-control-api（GUI 側）と kagelife-mcp の feat/mcp-stdi
 #### PUT /v1/shaders/{name}
 body `{"source":"..."}`。処理順:
 1. 名前検査 → 400 `invalid_name`
-2. 64KiB 超 → 413 `too_large`
-3. `//kage:unit pixels` の行が無い → 422 `unit_pixels_required`
-4. コンパイル（ファイルより先）。失敗 → ファイルに触れず 422:
+2. `-llm-slots` を付けて起動したときだけ: 予約名以外 → 403 `forbidden_name`、映っている予約名 → 409 `slot_live`。本文は読まない（補足 23。「映っている」は補足 24）
+3. 本文の解析（不正な JSON・未知のフィールド・`source` の欠落 → 400 `invalid_request`、本文全体が 1MiB 超 → 413 `too_large`）。source が 64KiB 超 → 413 `too_large`
+4. `//kage:unit pixels` の行が無い → 422 `unit_pixels_required`
+5. コンパイル（ファイルより先）。失敗 → ファイルに触れず 422:
    ```json
    {"error":"compile_error","message":"<整えた要約>","diagnostics":[{"line":5,"col":14,"message":"unexpected identifier: Nope"}]}
    ```
    - diagnostics はソースの行数以内のものだけ（Ebitengine は内部コードを連結して解析するため、範囲外の行は捨てる）。最大 10 件
    - 構文エラーは `errors.As(err, *scanner.ErrorList)` で取れる。意味エラーは文字列 `行:列: メッセージ`（改行区切り）を解析する。どちらにも当たらないものは `line=0,col=0` で message にそのまま入れる
-5. 成功 → `<shader_dir>/<name>.kage` に書き込み（同ディレクトリの一時ファイル＋rename）、Manager で差し替え（無ければファイル名順の位置に追加。2026-10-02 改訂、旧版は「末尾に追加」）。
+6. `-llm-slots` を付けて起動したときだけ: 書く直前に、映っているかをもう一度確かめる → 映っていれば 409 `slot_live`（ファイルに触れず、コンパイル済みのシェーダは捨てる。補足 23）
+7. 成功 → `<shader_dir>/<name>.kage` に書き込み（同ディレクトリの一時ファイル＋rename）、Manager で差し替え（無ければファイル名順の位置に追加。2026-10-02 改訂、旧版は「末尾に追加」）。
    200 `{"name":"x","created":true}`（新規なら true、既存の差し替えなら false。ファイル基準: 補足 7）
    直後に fsnotify 経由で同じファイルが再読込されても害が無いこと
    成功してもアクティブにはしない（表示中のシェーダが無い状態を除く。補足 14）
@@ -109,6 +112,52 @@ BPM は常に 40〜300 で 0 にならないため、BPM を理由に失敗す�
 body `{"bpm":128}` → 40〜300 以外は 400 `invalid_bpm`。200 `{"bpm":128.0}`。
 範囲はタップ BPM の制限と同じ（[ADR-008](ADR-008-crossfade-compositing.md) D3）。タップ BPM と共存する。以後のタップで上書きされてよい
 
+### Stream Deck 用の任意機能（2026-11-11 追加。補足 27〜33）
+
+同じ機械に挿した Stream Deck MK.2（キー画像 72×72）の常駐アプリ（別リポジトリ `cyokozai/kagelife-deck`）から使う 2 つの任意機能。
+どちらも `features` に名前を出し（補足 27）、発見ファイルの `version` は 1 のまま。
+番号は PR #42（LLM 背景スロット）の補足 21〜26 から続ける。この節を補足の並びの末尾に置かないのは、#42 と同じ場所に書き足して衝突させないためである。
+
+#### GET /v1/previews（feature `previews`）
+要求本文は無い。クエリは見ない（知らないクエリも無視して 200）。200:
+```json
+{"size":72,"fps":10,"frame":123,
+ "keys":[{"key":"1","name":"01_uv","jpeg":"<base64 の 72x72 JPEG>","compile_error":false}]}
+```
+- `keys` はキーの順（"1"〜"9"）で、GUI の数字キーと同じ対応（ファイル名順。`-llm-slots` 有りなら 1〜7 が予約名以外、8・9 が予約名）。割り当ての無い数字は出さない。割り当てが無ければ `[]`（null にしない）
+- `jpeg` は 72×72 の JPEG（品質 80）の base64。まだ描いていないとき、コンパイルに失敗したスロットでは null。`compile_error` はその 2 つを区別する
+- `frame` はプレビューを描くたびに 1 増える。起動直後は 0
+- 描く条件と最初の要求の扱いは補足 28、描く中身は補足 29
+- GUI を `-previews=false` で起動すると 404 `not_found`（未定義パスと同じ）で、`features` に `previews` を出さない（補足 32）
+
+#### POST /v1/keys（feature `keys`）
+body `{"key":"1","shift":false}`（`shift` は省略可、既定 false）→ 200 `{"key":"1"}`。
+- `key` は `"0"`〜`"9"`・`"["`・`"]"` のどれか。それ以外は 400 `invalid_key`
+- 割り当ての無い数字は 404 `not_found`（`-llm-slots` 無しのときのキー 0 を含む）
+- 判定順は 本文 400 `invalid_request`（不正な JSON・`key` の欠落・型違い・未知のフィールド）→ 400 `invalid_key` → 404 `not_found`
+- 挙動は補足 30
+
+27. **`features` の `keys`・`previews`**: `features` は `["keys","llm_slots","previews"]` を返す（名前順）。`keys` はこのビルドが機能を持つことだけを示し、起動時のフラグでは変わらない。`previews` は `-previews=false` のときだけ出さない（補足 32）
+28. **プレビューを描く条件**: GUI は、直近 2 秒以内に `GET /v1/previews` が来ているときだけプレビューを描く。来ていなければ GPU も CPU も追加で使わない。描く頻度は最大 10 fps
+    - 止まっている状態（起動直後、または 2 秒以上要求が無かった）からの最初の要求は、ゲームループから今の割り当てを読み、`jpeg` をすべて null にして即答する。前に描いた古い絵は返さない。この要求で描き始める。ゲームループが止まっていれば 503 `loop_timeout`
+    - 描いている間の要求は、最新の完成したフレームをそのまま返す（ゲームループを待たない）
+    - 401 で断った要求では描き始めない
+29. **プレビューの中身**: 各キーのスロットのシェーダを、そのフレームの本番の出力と同じ `Time`・`Beat`・`Frame`・`Random` で描く。`Resolution` は 72×72、`Cursor` は画面の座標を 72×72 へ縮めた値。クロスフェードは描かず、スロットごとのシェーダをそのまま描く
+    - 毎回そのときのスロットのシェーダを描くので、`PUT /v1/shaders/{name}` やファイル監視で差し替えたシェーダは、次のプレビューフレームから新しい中身で描かれる
+    - 割り当て（どのキーがどのシェーダか）も描くたびに読み直す。ファイルの追加・削除でキーがずれたら、`name` もずれる
+    - アルファが 1 未満の画素は黒の上に重ねた色になる（JPEG に透過は無い）
+30. **キーの挙動**: GUI のキーボードでそのキーを押したのと同じ関数を、ゲームループ（Update キュー）の上で呼ぶ。挙動はキーボードと同じで、ここでは二重に定めない
+    - 数字は即時切替、`shift` が true なら Shift＋数字（クロスフェード、プリセットの拍数）
+    - キー 0（`-llm-slots` 有りのときだけ）は直前に映っていた予約名以外のシェーダへの即時切替。戻り先は、その要求を処理する時点の表示も含めて記録してから選ぶ（キーボードと同じく、押す直前の表示を記録する）。`shift` は見ない
+    - `[` `]` はプリセットの拍数を 1 段変える。`shift` は見ない
+    - 割り当てはあるがコンパイルに失敗したスロットのキーは、キーボードと同じく何もしないで 200 を返す。戻り先が無いときのキー 0 も同じ。実際に切り替わったかは `GET /v1/state` で確かめる
+31. **実装の注記（契約ではない）**: 9 個を 1 枚の 216×216 のアトラスに描き、GPU からの読み出しは 1 プレビューフレームにつき 1 回。読み出し（`ReadPixels`）は積んである描画命令をすべて流して待つので、Draw の中で本番の描画を積む前に行う。JPEG の符号化はゲームループの外（別 goroutine）で行い、符号化が終わるまで次のプレビューを描かない。セルとアトラスの画像は Ebitengine の内部のテクスチャアトラスに載せない（`Unmanaged`）。載せると `dstPos` に詰めた位置が足され、`dstPos / Resolution` で座標を出すシェーダの絵がずれる
+32. **`-previews` フラグ**: GUI の `-previews`（既定 true）を false にすると、プレビューを描かず、`GET /v1/previews` は 404 `not_found`、`features` に `previews` を出さない。デッキは `features` を見て、キーの表示を文字に戻す。`keys` は止めない（`-previews=false` でも `POST /v1/keys` は使える）
+33. **予約 uniform の型違い**: 予約 uniform の名前で型の違う宣言（例: `var Time vec2`、`var Resolution vec3`）は Kage のコンパイルを通るが、Ebitengine は描くときに panic する。GUI はこれを描く前に弾き、コンパイル失敗と同じに扱う。型は `Time`・`Beat`・`Random` が float、`Frame` が int、`Resolution`・`Cursor` が vec2
+    - ファイル監視の読み込み・再読込: 1×1 に試し描きして panic すれば、コンパイル失敗と同じ（旧シェーダのまま、新しいファイルは nil のスロット、`last_error` に記録）。`message` に uniform の型が合わないことを書く
+    - PUT: コンパイルの後、書く前にゲームループで試し描きする。型違いなら 422 `compile_error`（ファイルにも Manager にも触れない。`diagnostics` は位置不明として line 0 / col 0 の 1 件）。このため PUT はゲームループを 1 回多く待つ（`-llm-slots` 付きなら最大 4 回）。ループが止まっていて試し描きできなければ飛ばして書き、差し替えの処理でもう一度確かめる（そこで型違いなら 422 で、ファイルは書いてあるが Manager には入らない。ファイル監視の再読込でもコンパイル失敗になる）
+    - プレビュー: それでも描くときに panic したキーは、そのキーだけ `compile_error: true`・`jpeg: null` にして、他のキーは描き続ける
+
 ### v1 の範囲外（後続 PR）
 - `GET /v1/capture?max_width=1024&format=png|jpeg`（feat/mcp-capture-frame）
 - `POST /v1/uniforms`、state への uniform 一覧（feat/mcp-uniform-params）
@@ -124,11 +173,14 @@ body `{"bpm":128}` → 40〜300 以外は 400 `invalid_bpm`。200 `{"bpm":128.0}
 |------|-------|---------|
 | 400 | `invalid_request` | JSON 本文が不正、必須項目が欠けている、または契約に無いフィールドがある（message にフィールド名。補足 19） |
 | 400 | `invalid_name` | シェーダ名が正規表現に合わない（GET・PUT・switch・crossfade。エスケープはデコードしてから検査） |
+| 400 | `invalid_key` | POST /v1/keys の `key` が `"0"`〜`"9"`・`"["`・`"]"` のどれでもない。割り当ての無い数字は 404 `not_found`（補足 30） |
 | 400 | `invalid_beats` | beats が 0 以下または 64 超 |
 | 400 | `invalid_bpm` | bpm が 40〜300 の外 |
 | 401 | `unauthorized` | トークンの欠落・不一致 |
+| 403 | `forbidden_name` | `-llm-slots` を付けて起動した GUI への PUT で、名前が予約名でない（補足 23） |
 | 404 | `not_found` | シェーダが無い、または未定義パス。switch・crossfade では、コンパイルに失敗したファイルも含む（補足 16） |
 | 405 | `method_not_allowed` | メソッド違い |
+| 409 | `slot_live` | `-llm-slots` を付けて起動した GUI への PUT で、予約名が映っている（補足 23・24） |
 | 413 | `too_large` | ソースが 64KiB 超、または JSON 本文全体が 1MiB 超 |
 | 422 | `unit_pixels_required` | `//kage:unit pixels` の行が無い |
 | 422 | `compile_error` | コンパイル失敗（`diagnostics` 付き） |
@@ -149,7 +201,7 @@ feat/mcp-control-api の実装で確定した補足。本節と実装が食い�
 8. **`last_error` の寿命**: コンパイルに失敗するたびに上書きし、どのシェーダでも次にコンパイルが成功したら null に戻る。PUT の失敗も記録する。ただし、起動時の読み込みで失敗したシェーダは `last_error` に入らず、ログにだけ出る
 9. **ループバックの判定**: IP リテラルだけで判定する（127.0.0.0/8 と ::1）。`localhost` や `0.0.0.0` は起動エラー
 10. **範囲外だけの diagnostics**: diagnostics が全件ソースの行の範囲外のときは、先頭の 1 件を line 0 / col 0 として返す（空の配列にはしない）
-11. **PUT の loop_timeout**: PUT が `loop_timeout` になった場合、ファイルは書き込み済みである。反映はファイル監視に任せる
+11. **PUT の loop_timeout**: PUT が `loop_timeout` になった場合、ファイルは書き込み済みである。反映はファイル監視に任せる（`-llm-slots` を付けたときは、書く前の判定で 503 になるとファイルは書かれない。補足 26）
 12. **本文の上限**: JSON 本文全体の上限は 1MiB（413 `too_large`）。source 単体は 64KiB まで
 13. **発見ファイルの削除**: 終了時の削除は、ファイルの中の token が自分のものと一致するときだけ行う（後から起動した別の GUI の発見ファイルを消さない）
 14. **PUT とアクティブ**: PUT は成功してもアクティブにしない（切り替えは switch / crossfade で行う）。例外として、表示中のシェーダが無い状態で PUT が成功すると、そのシェーダが表示される。表示中のシェーダが無い状態とは、A（アクティブ）がシェーダを持たないスロット（コンパイルに失敗したファイルの nil のスロット）を指している状態、またはスロットが 0 本の状態で、シェーダが 0 本のときだけでなく、全ファイルがコンパイルに失敗したときも当たる。shadermgr は A が nil のスロットを指しているときに限り、差し替えに成功したスロットへ A を寄せる（A がシェーダを持つなら動かさない。ファイル監視経由の再読込の成功も同じ規則）。（2026-10-02 改訂。旧版の理由「Manager は常に index 0 を表示する」はファイル名順のスロット固定の導入で古くなった）
@@ -178,7 +230,26 @@ feat/mcp-control-api の実装で確定した補足。本節と実装が食い�
 古い GUI が知らないフィールドを黙って無視すると、量子化を頼んだ操作が即時に実行されるといった食い違いが表に出ない。これを #24 のマージ前に塞ぐ。番号は補足 1〜18 から続ける。
 
 19. **未知のフィールドの拒否**: 要求本文の JSON（PUT /v1/shaders/{name}、POST /v1/switch、POST /v1/crossfade、POST /v1/bpm と、今後足すエンドポイントのすべて）に、そのエンドポイントの契約に無いフィールドがあれば 400 `invalid_request` を返す。message には未知のフィールドの名前を入れる（例: `unknown field "at"`）。検査の順では JSON の解析の一部として、名前・beats・bpm などの値の検査より先に行う。応答の側はこの限りでない: GUI は応答にフィールドを足すことがあるので、クライアント（`kagelife-mcp`・指揮役）は応答の知らないフィールドを無視する
-20. **`features`**: `GET /v1/state` に `features` を出す。常に配列で、null にも省略にもしない。要素は GUI が持つ任意機能の snake_case の名前（`^[a-z][a-z0-9_]*$`）で、並びは名前順。v1 の時点では空配列。任意機能を足す PR（PRD §12 の A〜D）は、その機能の名前を足し、本 ADR に名前と中身を書く（名前の一覧の置き場所は PRD Q-016）。クライアントは任意機能を使う前に `features` で有無を確かめ、無ければ GUI の版が古いことを `isError` で返す。発見ファイルの `version` は 1 のまま上げない。`version` は既存の要求・応答の意味が変わる非互換な変更のためにとっておき、機能の追加は `features` で示す
+20. **`features`**: `GET /v1/state` に `features` を出す。常に配列で、null にも省略にもしない。要素は GUI が持つ任意機能の snake_case の名前（`^[a-z][a-z0-9_]*$`）で、並びは名前順。v1 の時点では空配列（2026-11-09 改訂: 今は `keys`・`llm_slots`・`previews` を持つ。補足 21・27）。任意機能を足す PR（PRD §12 の A〜D）は、その機能の名前を足し、本 ADR に名前と中身を書く（名前の一覧の置き場所は PRD Q-016）。クライアントは任意機能を使う前に `features` で有無を確かめ、無ければ GUI の版が古いことを `isError` で返す。発見ファイルの `version` は 1 のまま上げない。`version` は既存の要求・応答の意味が変わる非互換な変更のためにとっておき、機能の追加は `features` で示す
+
+### 補足（2026-11-09 追加）
+
+LLM 背景スロット（PR #33、マージ済み）の契約。GUI を `-llm-slots llm_a,llm_b` のように起動すると、LLM が書く名前を予約し、PUT をその名前だけに絞り、映っている予約名への書き込みを断る。一方を映している間にもう一方へ書かせ、書き終えたら crossfade で切り替える使い方を想定する。キー 8・9・0 の割り当ては GUI の操作で、制御口の契約ではない（README の「LLM 背景スロット」の節）。番号は補足 1〜20 から続ける。
+
+21. **`features` の `llm_slots`**: `features` は `llm_slots` を含む（今返す配列の全体は補足 27）。これはこのビルドが LLM 背景スロットの機能を持つことだけを示し、`-llm-slots` を付けずに起動しても出る。予約名が設定されているかは state の `llm_slots` が空かどうかで見る（補足 22）。補足 20 の「v1 の時点では空配列」はこの機能の追加で改めた。発見ファイルの `version` は 1 のまま
+22. **state の `llm_slots`**: `GET /v1/state` に `llm_slots` を出す。`-llm-slots` の予約名をフラグに書いた順に並べた配列で、フラグ無しなら `[]`（null にも省略にもしない）。`-llm-slots` の値はカンマ区切りで 1〜2 個、各名前はシェーダ名の正規表現 `^[a-z0-9][a-z0-9_-]{0,63}$`（拡張子なし）に合うこと。前後の空白は除く。3 個以上・規則違反・重複は起動エラー。予約名のファイルがまだ無くてもよい（`shaders` に出るのはファイルができてから）
+23. **PUT の制限と判定の順**: `llm_slots` が空でなければ、PUT /v1/shaders/{name} は次の順で判定する。名前検査 400 `invalid_name` → 予約名以外 403 `forbidden_name` → 映っている予約名 409 `slot_live` → 本文（400 `invalid_request` / 413 `too_large` / 422 `unit_pixels_required` / 422 `compile_error`）→ 書く直前にもう一度 409 `slot_live`
+    - 403 と 409 は本文を読む前に返す。本文が不正でも、1MiB を超えていても、先に 403 / 409 になる。補足 19 の「未知のフィールドの拒否は値の検査より先」は本文の中の順序で、パスの名前と予約名の判定は本文より先に行う
+    - 403 は設定済みの予約名と比べるだけで、ゲームループを待たない。409 の判定はゲームループの上で行う（補足 24 の状態を読むため）
+    - 書く直前の 2 回目の判定は、本文の読み込みとコンパイルの間に、その予約名が switch / crossfade / キー操作で映った場合に備える。ここで 409 になったらファイルにも Manager にも触れず、コンパイル済みのシェーダは捨てる
+    - 403 の `message` は予約名の一覧を、409 の `message` は書いてよいもう一方の予約名を示す（予約名が 1 個なら、映らなくなるまで待つよう促す）
+    - 制限するのは PUT だけ。GET /v1/shaders/{name}、switch、crossfade、bpm は `-llm-slots` の有無で変わらない。予約名への switch / crossfade もできる。表示中のシェーダが無い状態で予約名への PUT が成功すると表示される規則（補足 14）も同じ
+    - フラグ無しなら 403 / 409 は出ず、PUT は今までどおりどの名前にも書ける
+24. **「映っている」の定義**: 予約名 `name` が映っているとは、次のどちらかが成り立つこと（kagelife-mcp も同じ定義を使う）
+    - state の `active` が `name` で、そのスロットのコンパイルに成功している（シェーダを持つ）。`active` がコンパイルに失敗したスロット（何も描かれていない nil のスロット。補足 16）を指しているなら、その名前は映っていない
+    - `fade.fading` が true で、`fade.target` が `name`。フェードしていない間の `fade.target` の名残は映っていない扱いにする
+25. **予約名が 1 個のとき・ループが止まっているとき**: 予約名は 1 個でもよいが、映っている間はその名前に書けない（409）ので、2 個を勧める（GUI も起動ログで勧める）。ゲームループが止まっているとき、予約名への PUT は 1 回目の 409 の判定で 503 `loop_timeout` になり、ファイルを書かない。予約名以外への PUT はループを待たないので、止まっていても 403 `forbidden_name` を返す
+26. **PUT の待ち時間と 503**: `-llm-slots` を付けたときの PUT は、ゲームループを最大 4 回待ちうる（映っているかの判定 2 回、書く前の試し描き 1 回（補足 33）、Manager への差し替え 1 回）。待つたびに上限は 2 秒なので、ループが遅いと応答まで最大でおよそ 8 秒かかる。試し描きの待ちが上限を超えても 503 にはせず、試し描きを飛ばして先へ進む。503 になるのは判定の待ちと差し替えの待ちだけである。補足 11（503 でもファイルは書き込み済み）が当てはまるのは差し替えの待ちで 503 になった場合だけで、判定の待ち（1 回目・2 回目のどちらでも）で 503 になった場合はファイルを書いていない。クライアントは 503 からはどちらかを区別できないので、必要なら GET /v1/shaders/{name} でソースを確かめる
 
 ---
 
@@ -191,6 +262,7 @@ feat/mcp-control-api の実装で確定した補足。本節と実装が食い�
 | list_shaders | GET /v1/state | `shaders` と `active` を返す |
 | read_shader | GET /v1/shaders/{name} | |
 | write_shader | PUT /v1/shaders/{name} | 丸ごと置き換え |
+| write_back_slot | GET /v1/state → PUT /v1/shaders/{name} | kagelife-mcp #3 で追加予定（未マージ）。`llm_slots` のうち映っていない側（補足 24）へ全文を書く。画面は切り替えないので、続けて crossfade を呼ぶ。`slot_live` なら state を 1 回だけ読み直して残りを試す。`llm_slots` が空の GUI には書かない |
 | switch_shader | POST /v1/switch | |
 | crossfade | POST /v1/crossfade | |
 | set_bpm | POST /v1/bpm | |
@@ -279,7 +351,7 @@ sequenceDiagram
 **ネガティブ**:
 - `rename` による書き込みの直後に fsnotify が同じファイルを再読込する（害は無いが、コンパイルが 1 回余分に走る）
 - 一時ファイルは `.kage` で終わらない名前にし、監視対象に拾われないようにする必要がある
-- PUT が `loop_timeout` になったとき、ファイルは書き込み済みである。反映はファイル監視に任せる（補足 11）
+- PUT が `loop_timeout` になったとき、ファイルは書き込み済みである。反映はファイル監視に任せる（補足 11。`-llm-slots` 付きでは書いていない場合もある: 補足 26）
 - 契約をリポジトリをまたいで守る必要がある。kagelife-mcp 側は本 ADR を参照し、発見ファイルの `version` が 1 以外なら接続しない
 
 **Action Items**:
@@ -292,3 +364,5 @@ sequenceDiagram
 - [ ] 補足 19・20 を #24 のマージ前に実装し、テストで固定する（各エンドポイントで未知のフィールドが 400 `invalid_request` になり message にフィールド名が入ること、`features` が空配列で出ること）
 - [ ] kagelife-mcp #1 を補足 19・20 に追従させる（要求に余計なフィールドを送らない、応答の知らないフィールドを無視する）
 - [ ] 仕様の確認: 全ファイルがコンパイルに失敗した状態で `active` に switch できない nil のスロットの名前が入る（補足 16）。`active` を null にするか決める
+- [ ] 補足 21〜26 のうち、PR #33 のテスト（`internal/control/llmslots_test.go`・`strict_test.go`）で固定されていないもの（書く直前の 2 回目の 409、503 になった待ちの位置とファイルの有無の対応）をテストで固定する
+- [ ] kagelife-mcp #3（`write_back_slot`）のマージ後に、上の MCP ツールの表の「追加予定」を外す

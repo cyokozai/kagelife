@@ -1,8 +1,19 @@
 # KageLife
 
-KageLife は，Ebitengine の Kage シェーダーを保存するだけで画面にリアルタイム反映する，Go 製の VJ ライブコーディングツールです．
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/kagelife-icon-dark.svg">
+    <img src="assets/logo/kagelife-icon-light.svg" alt="KageLife のロゴ" width="160">
+  </picture>
+</p>
+
+KageLife は，[Ebitengine](https://ebitengine.org/ja/) の Kage シェーダーを保存するだけで画面にリアルタイム反映する，Go 製の VJ ライブコーディングツールです．
 好きなエディタで `shaders/` 以下の `.kage` を書き換えて保存すると，自動で再コンパイルして描画を差し替えます．
 `Time` や `Beat` などの Uniform は自動で注入され，数字キーでのシェーダー切り替え，タップテンポに同期したクロスフェードでパフォーマンスできます．
+
+> **名前について**: 「Kage」は Ebitengine のシェーダー言語の名前です．
+> KageLife という名前は，Hexler Limited のシェーダーのライブコーディング環境 [KodeLife](https://hexler.net/kodelife) への敬意から付けました．
+> KageLife は KodeLife および Hexler Limited とは関係のない，非公式で独立したプロジェクトです．
 
 ---
 
@@ -11,36 +22,61 @@ KageLife は，Ebitengine の Kage シェーダーを保存するだけで画面
 [GitHub Releases](https://github.com/cyokozai/kagelife/releases) からビルド済みの配布物を入手できます．
 対象は次の 4 つです．
 
-| OS | アーキテクチャ | ファイル名 |
-| --- | --- | --- |
-| macOS | Apple シリコン | `kagelife-<version>-darwin-arm64.tar.gz` |
-| macOS | Intel | `kagelife-<version>-darwin-amd64.tar.gz` |
-| Linux | x86_64 | `kagelife-<version>-linux-amd64.tar.gz` |
-| Linux | arm64 | `kagelife-<version>-linux-arm64.tar.gz` |
+| OS | アーキテクチャ | `uname -m` の表示 | ファイル名 |
+| --- | --- | --- | --- |
+| macOS | Apple シリコン | `arm64` | `kagelife-<version>-darwin-arm64.tar.gz` |
+| macOS | Intel | `x86_64` | `kagelife-<version>-darwin-amd64.tar.gz` |
+| Linux | x86_64 | `x86_64` | `kagelife-<version>-linux-amd64.tar.gz` |
+| Linux | arm64 | `aarch64` | `kagelife-<version>-linux-arm64.tar.gz` |
 
-### 1. ダウンロードと検証
+以下の例は，Apple シリコンの Mac に `~/Applications/kagelife` へ入れる場合です．
+版・OS・アーキテクチャと置き場所は，使う環境に合わせて書き換えてください（Linux なら `~/.local/opt/kagelife` など）．
 
-使う環境の `tar.gz` と，同じリリースにある `SHA256SUMS` を同じディレクトリに置き，チェックサムを確かめます．
+### 1. ダウンロード
+
+置き場所を作り，使う環境の `tar.gz` と，同じリリースにある `SHA256SUMS` を同じディレクトリに落とします．
+
+```bash
+VERSION=v0.2.0
+ASSET=kagelife-$VERSION-darwin-arm64
+mkdir -p ~/Applications/kagelife && cd ~/Applications/kagelife
+```
+
+[GitHub CLI](https://cli.github.com/)（`gh`）を使う場合:
+
+```bash
+gh release download $VERSION -R cyokozai/kagelife -p "$ASSET.tar.gz" -p SHA256SUMS
+```
+
+`curl` を使う場合:
+
+```bash
+curl -LO https://github.com/cyokozai/kagelife/releases/download/$VERSION/$ASSET.tar.gz
+curl -LO https://github.com/cyokozai/kagelife/releases/download/$VERSION/SHA256SUMS
+```
+
+ブラウザで落としてもかまいません．その場合は 2 つのファイルを置き場所へ移してください．
+
+### 2. 検証
 
 `SHA256SUMS` には全 OS の配布物が載っているので，落としたファイルの行だけを取り出して検証します．
 
 ```bash
 # macOS
-grep kagelife-<version>-<os>-<arch>.tar.gz SHA256SUMS | shasum -a 256 -c -
+grep "$ASSET.tar.gz" SHA256SUMS | shasum -a 256 -c -
 # Linux
-grep kagelife-<version>-<os>-<arch>.tar.gz SHA256SUMS | sha256sum -c -
+grep "$ASSET.tar.gz" SHA256SUMS | sha256sum -c -
 ```
 
-`OK` と表示されれば検証は完了です．
+`kagelife-<version>-<os>-<arch>.tar.gz: OK` と表示されれば検証は完了です．
 
-### 2. 展開
+### 3. 展開
 
 ```bash
-tar -xzf kagelife-<version>-<os>-<arch>.tar.gz
-cd kagelife-<version>-<os>-<arch>
+tar -xzf "$ASSET.tar.gz"
 ```
 
-展開したディレクトリには次のファイルが入っています．
+`~/Applications/kagelife/<ASSET>/` に次のファイルが入ります．
 
 | ファイル | 内容 |
 | --- | --- |
@@ -49,17 +85,60 @@ cd kagelife-<version>-<os>-<arch>
 | `README.md` | このファイル |
 | `LICENSE` | ライセンス（MIT） |
 
-### 3. 起動前の準備
+### 4. 起動前の準備
 
 - **macOS**: ブラウザで落としたファイルには quarantine 属性が付き，そのままでは Gatekeeper に止められます．次のコマンドで外してください．
+  `gh` や `curl` で落とした場合は属性が付かないので，`No such xattr: com.apple.quarantine` と表示されますが，問題ありません．
 
   ```bash
-  xattr -d com.apple.quarantine kagelife
+  xattr -d com.apple.quarantine "$ASSET/kagelife"
   ```
 
 - **Linux**: X11 と OpenGL の実行時ライブラリが要ります．デスクトップ環境の入った多くのディストリビューションでは入っています．
 
-展開したディレクトリで `./kagelife` を実行すると起動します．
+### 5. コマンドとして使えるようにする
+
+展開したディレクトリの `kagelife` は PATH に入っていないので，そのまま `kagelife` と打つと `command not found` になります．
+展開したディレクトリの中で `./kagelife` と打てば起動できますが，どこからでも `kagelife` で呼べるようにするには，次の 2 つを行います．
+
+版に依存しない入口として `current` というリンクを作ります．
+
+```bash
+ln -sfn ~/Applications/kagelife/$ASSET ~/Applications/kagelife/current
+```
+
+そのリンクを PATH に足します．zsh（macOS の既定）なら `~/.zshrc`，bash なら `~/.bashrc` の末尾に 1 行足し，シェルに読み込み直します．
+
+```bash
+echo 'export PATH="$PATH:$HOME/Applications/kagelife/current"' >> ~/.zshrc
+source ~/.zshrc
+which kagelife   # ~/Applications/kagelife/current/kagelife と出れば完了
+```
+
+`~/.local/bin` のように，すでに PATH に入っているディレクトリがあるなら，シェルの設定ファイルを触らずに `ln -s ~/Applications/kagelife/current/kagelife ~/.local/bin/kagelife` でもかまいません．
+
+### 6. 起動
+
+```bash
+kagelife -shaders ~/Applications/kagelife/current/shaders
+```
+
+`-shaders` を省くと，**いまいるディレクトリ**の `shaders/` を読みます（起動した場所に依存します）．
+コマンドとして使うときは，使うシェーダーのフォルダを `-shaders` で指定してください．
+
+### 新しい版への更新
+
+新しい版を 1〜4 の手順で同じ置き場所に落として展開し，`current` のリンクを張り替えます．PATH の設定はそのままで使えます．
+
+```bash
+VERSION=<新しい版>
+ASSET=kagelife-$VERSION-darwin-arm64
+# 1〜4 の手順のあと
+ln -sfn ~/Applications/kagelife/$ASSET ~/Applications/kagelife/current
+kagelife -version
+```
+
+古い版のディレクトリは，動作を確かめてから消してください．
 
 ---
 
@@ -67,10 +146,11 @@ cd kagelife-<version>-<os>-<arch>
 
 ### 起動
 
-配布物を使う場合は，展開したディレクトリで次を実行します．
+配布物を使う場合は，「インストール」の 5 で PATH に入れていれば次を実行します．
+PATH に入れていない場合は，展開したディレクトリで `./kagelife` と打ちます（`./` を付けないと `command not found` になります）．
 
 ```bash
-./kagelife
+kagelife -shaders ~/Applications/kagelife/current/shaders
 ```
 
 ソースから動かす場合は，リポジトリのルートディレクトリで次のどちらかを実行します．
@@ -97,6 +177,8 @@ go run .
 | `-list-displays` | — | ディスプレイの番号・名前・大きさ・拡大率を表示して終了する（ウィンドウは開かない） |
 | `-display <N>` | なし | ウィンドウ（全画面）を出すディスプレイの番号（1 始まり．`-list-displays` の番号）．範囲外なら一覧を出して起動エラー |
 | `-fullscreen` | — | 起動時から全画面にする．全画面のあいだはマウスカーソルを隠し，`F` でウィンドウに戻すと表示に戻す |
+| `-link` | 無効 | Carabiner 経由で Ableton Link（rekordbox の LINK など）に BPM と拍を合わせる．後述の「Ableton Link で拍を合わせる」を参照 |
+| `-link-addr <addr>` | `127.0.0.1:17000` | `-link` のときに接続する Carabiner の待受アドレス |
 | `-render-scale <S>` | `1.0` | シェーダーを描く解像度の倍率（0.25〜1.0）．1.0 未満なら画面 × S の大きさに描き，線形補間で拡大して出す（GPU の負荷を下げる）．このときシェーダーの `Resolution` は縮めた大きさ，`Cursor` も同じ倍率で縮めた座標になる．HUD は縮めない．制御口の state の `resolution` は画面の大きさのまま．範囲外は起動エラー |
 
 ```bash
@@ -131,7 +213,7 @@ go run .
 | --- | --- |
 | `1` 〜 `9` | N 番目のシェーダーに即座に切り替える |
 | `Shift` + `1` 〜 `9` | N 番目のシェーダーへクロスフェードする（フェード時間は拍数で指定） |
-| `Space` | タップテンポ．叩いた間隔から BPM を求める |
+| `Space` | タップテンポ．叩いた間隔から BPM を求める（`-link` で Link に同期中は無視する） |
 | `[` | クロスフェードの拍数を 1 段階減らす |
 | `]` | クロスフェードの拍数を 1 段階増やす |
 | `H` | HUD（BPM・フェード拍数・ミックス比・エラー）の表示を切り替える |
@@ -157,6 +239,25 @@ go run .
 
 詳細は [ADR-008](docs/adr/ADR-008-crossfade-compositing.md) にあります．
 
+### Ableton Link で拍を合わせる（`-link`）
+
+`-link` を付けると，[Carabiner](https://github.com/Deep-Symmetry/carabiner)（Ableton Link を TCP のテキストで中継する別のプログラム）に接続し，Link のセッション（rekordbox の LINK など）の BPM と拍に合わせます．
+kagelife は Link の SDK を持たず，Carabiner とだけ話します．Carabiner は自分で入手して，kagelife を動かす機体で先に起動しておきます（`127.0.0.1` しか受け付けないため）．
+
+- **Mac 1 台**（rekordbox と kagelife が同じ Mac）: その Mac で `./Carabiner` を起動し，rekordbox の LINK を ON にしてから `./kagelife -link` を起動します．
+- **2 台**（rekordbox の機体と kagelife の機体を LAN でつなぐ）: Carabiner は **kagelife 側の機体**で起動します．Link は同じ LAN の上で相手を探すので，2 台は同じネットワークにつなぎます．rekordbox の機体には Carabiner は要りません．
+
+```bash
+./Carabiner          # 別のターミナルで起動し，開いたままにする
+./kagelife -link     # 既定の 127.0.0.1:17000 に接続する
+```
+
+- Carabiner の入手・署名の確かめ方・rekordbox の LINK の入れ方は [docs/poc-carabiner-link.md](docs/poc-carabiner-link.md) にあります．
+- Link の相手がいるあいだ（同期中）は，BPM（HUD・クロスフェードの進み方）と `Beat` を Link から取ります．`-av-offset` は Link の拍にも掛かります．`Space` のタップは BPM も拍頭も変えません．
+- HUD の状態行に `Link: synced (1 peer)` のように出ます．同期していないときは `Link: offline (tap)`（Carabiner につながらない）・`Link: waiting (tap)`（応答待ち）・`Link: no peers (tap)`（Link の相手がいない）で，タップテンポで動きます．
+- 同期が切れたら（Carabiner が落ちた・rekordbox の LINK を OFF にした），切れる直前の Link の BPM と拍頭をそのまま引き継いでタップテンポに戻ります．拍は飛びません．Carabiner が戻ると自動でつなぎ直します．
+- 制御口の `POST /v1/bpm`（set_bpm）は同期中も受け付けますが，次のフレームまでに Link の値へ戻ります．`GET /v1/state` の `bpm` は同期中は Link の BPM です（40〜300 に丸めた値）．
+
 ### LLM 背景スロット（`-llm-slots`，実験）
 
 ```bash
@@ -169,8 +270,8 @@ LLM（制御口を使う MCP サーバ）が書き込むシェーダーの名前
 | キー | 動作 |
 | --- | --- |
 | `1` 〜 `7` | 予約名を除いたシェーダーのうち，ファイル名順で N 番目に切り替える（`Shift` でクロスフェード） |
-| `8` / `9` | 予約名の 1 個目 / 2 個目に切り替える（`Shift` でクロスフェード）．`shaders/<名前>.kage` がまだ無い・コンパイルに失敗しているときは何もしない |
-| `0` | 直前に映っていた予約名以外のシェーダーへ即座に戻す．記録が無ければ予約名以外の最初のシェーダーへ |
+| `8` / `9` | 予約名の 1 個目 / 2 個目に切り替える（`Shift` でクロスフェード）．`shaders/<名前>.kage` がまだ無いとき，またはその名前がこのプロセスで一度もコンパイルに成功していないときは何もしない．一度成功していれば，あとでファイルのコンパイルが失敗しても，最後に成功した中身に切り替わる |
+| `0` | 直前に映っていた予約名以外のシェーダーへ即座に戻す．記録が無いときと，記録したシェーダーが使えないときは，予約名以外でコンパイルに成功している最初のシェーダーへ．それも無ければ何もしない．フェード中に押すとフェードを打ち切る（予約名へ向かうフェードなら切り替え元へ，予約名以外へ向かうフェードならフェード先へ即座に切り替わる） |
 
 - 制御口の `PUT /v1/shaders/{name}` は予約名にだけ書けます．予約名以外は `403 forbidden_name`，映っている予約名（表示中，またはクロスフェード中のフェード先）は `409 slot_live` で断ります．
 - `GET /v1/state` の `llm_slots` に予約名がフラグの順で入ります（フラグ無しなら `[]`）．
@@ -184,7 +285,7 @@ LLM（制御口を使う MCP サーバ）が書き込むシェーダーの名前
 | --- | --- | --- |
 | `Time` | `float` | 起動からの経過秒数 |
 | `Resolution` | `vec2` | 描画先の幅と高さ（ピクセル） |
-| `Beat` | `float` | 拍内の位相 `0..1`．タップも制御口の `POST /v1/bpm` もまだ無いときは既定の 120 BPM で刻む．タップするたびにそのタップが拍頭になり，2 回目のタップから叩いた間隔の BPM で刻む（1 回目と，2 秒を超えて空けた後のタップでは直前の BPM を保つ）．`POST /v1/bpm` はタップの前でも後でも BPM と拍頭（呼んだ時刻）を設定し，それまでのタップ履歴を捨てる．BPM は 40〜300 に制限される |
+| `Beat` | `float` | 拍内の位相 `0..1`．タップも制御口の `POST /v1/bpm` もまだ無いときは既定の 120 BPM で刻む．タップするたびにそのタップが拍頭になり，2 回目のタップから叩いた間隔の BPM で刻む（1 回目と，2 秒を超えて空けた後のタップでは直前の BPM を保つ）．`POST /v1/bpm` はタップの前でも後でも BPM と拍頭（呼んだ時刻）を設定し，それまでのタップ履歴を捨てる．BPM は 40〜300 に制限される．`-link` で Link に同期中は Link の拍内の位相 |
 | `Cursor` | `vec2` | マウスカーソルの位置（ピクセル） |
 | `Frame` | `int` | 起動からのフレーム数 |
 | `Random` | `float` | フレームごとに変わる `[0, 1)` の乱数 |
@@ -230,7 +331,9 @@ KageLife は起動中，`127.0.0.1` に HTTP/JSON の制御口（v1）を開き�
 LLM などの外部のプログラムは，この制御口を通して状態の取得，シェーダーの読み書き，切り替えとクロスフェード，BPM の設定を行えます．
 
 - 契約（エンドポイント・認証・エラー）は [ADR-006](docs/adr/ADR-006-control-api.md) を正典とします．
+- `GET /v1/state` の `last_error` には，PUT とファイル監視で起きた失敗のうち最新の 1 件が入ります．起動時の読み込みで失敗したファイルは入らず，HUD とログにだけ出ます．
 - MCP の stdio サーバは別リポジトリ [cyokozai/kagelife-mcp](https://github.com/cyokozai/kagelife-mcp) にあり，この制御口へ中継します．
+- Stream Deck から操作する常駐アプリは別リポジトリ [cyokozai/kagelife-deck](https://github.com/cyokozai/kagelife-deck) にあり，この制御口の `GET /v1/previews` と `POST /v1/keys` を使います．
 
 ---
 
@@ -419,6 +522,14 @@ Refs: #
 | A: 説明責任者 (Accountable) | 成果物に対して最終責任を持つ人 |
 | C: 協業先 (Consulted) | 作業に際して相談・協力を求める人 |
 | I: 報告先 (Informed) | 進捗・完了を報告する人 |
+
+---
+
+## 関連リポジトリ
+
+- [cyokozai/kagelife-mcp](https://github.com/cyokozai/kagelife-mcp): LLM（Claude Code など）から KageLife を操作するための stdio MCP サーバです．起動中の KageLife の制御口へ中継します．
+- [cyokozai/kagelife-deck](https://github.com/cyokozai/kagelife-deck): Stream Deck MK.2 から KageLife の制御口 v1 を操作する常駐アプリです（Linux）．
+- [cyokozai/kagelife-shaders](https://github.com/cyokozai/kagelife-shaders): KageLife で読み込む Kage シェーダーのプリセット集です．
 
 ---
 

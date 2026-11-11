@@ -22,6 +22,8 @@ type harness struct {
 	comp *fakeCompiler
 	srv  *httptest.Server
 	stop func()
+	prev *Previews  // GET /v1/previews の状態（時計は clk）
+	clk  *fakeClock // prev の時計
 }
 
 // newHarness は shader_dir に names のファイルを置き、同じ名前を Engine に登録した制御口を立てる。
@@ -44,6 +46,9 @@ func newHarnessLLM(t *testing.T, loop bool, llmSlots []string, names ...string) 
 	}
 	h := &harness{t: t, dir: dir, eng: newTestEngine(dir, names...), q: NewQueue(16), comp: &fakeCompiler{}, stop: func() {}}
 	h.eng.LLMSlots = llmSlots
+	h.clk = newFakeClock()
+	h.prev = NewPreviews()
+	h.prev.Now = h.clk.Now
 	h.srv = httptest.NewServer(NewServer(ServerConfig{
 		Token:     testToken,
 		ShaderDir: dir,
@@ -51,6 +56,7 @@ func newHarnessLLM(t *testing.T, loop bool, llmSlots []string, names ...string) 
 		Queue:     h.q,
 		Timeout:   100 * time.Millisecond,
 		LLMSlots:  llmSlots,
+		Previews:  h.prev,
 	}))
 	if loop {
 		h.stop = runLoop(h.q, h.eng)

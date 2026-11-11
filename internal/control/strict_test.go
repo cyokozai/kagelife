@@ -44,6 +44,7 @@ func TestUnknownFieldsTooLargeStillWins(t *testing.T) {
 
 // state の features は常に配列で、このビルドが持つ任意機能を並べる。
 // llm_slots は -llm-slots を指定していなくても載る（設定済みかは state の llm_slots で見る）。
+// keys（POST /v1/keys）と previews（GET /v1/previews）も同じくビルドが持つことだけを示す。
 func TestGetState_FeaturesIsArray(t *testing.T) {
 	h := newHarness(t, true)
 
@@ -53,8 +54,8 @@ func TestGetState_FeaturesIsArray(t *testing.T) {
 	if !ok {
 		t.Fatalf("features が無い: %v", body)
 	}
-	if got := jsonBody(v); got != `["llm_slots"]` {
-		t.Errorf("features = %s, want [\"llm_slots\"]", got)
+	if got, want := jsonBody(v), `["keys","llm_slots","previews"]`; got != want {
+		t.Errorf("features = %s, want %s", got, want)
 	}
 }
 
