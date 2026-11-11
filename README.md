@@ -1,5 +1,12 @@
 # KageLife
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/kagelife-icon-dark.svg">
+    <img src="assets/logo/kagelife-icon-light.svg" alt="KageLife のロゴ" width="160">
+  </picture>
+</p>
+
 KageLife は，[Ebitengine](https://ebitengine.org/ja/) の Kage シェーダーを保存するだけで画面にリアルタイム反映する，Go 製の VJ ライブコーディングツールです．
 好きなエディタで `shaders/` 以下の `.kage` を書き換えて保存すると，自動で再コンパイルして描画を差し替えます．
 `Time` や `Beat` などの Uniform は自動で注入され，数字キーでのシェーダー切り替え，タップテンポに同期したクロスフェードでパフォーマンスできます．
