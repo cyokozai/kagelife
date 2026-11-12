@@ -177,7 +177,7 @@ go run .
 | `-list-displays` | — | ディスプレイの番号・名前・大きさ・拡大率を表示して終了する（ウィンドウは開かない） |
 | `-display <N>` | なし | ウィンドウ（全画面）を出すディスプレイの番号（1 始まり．`-list-displays` の番号）．範囲外なら一覧を出して起動エラー |
 | `-fullscreen` | — | 起動時から全画面にする．全画面のあいだはマウスカーソルを隠し，`F` でウィンドウに戻すと表示に戻す |
-| `-link` | 無効 | Carabiner 経由で Ableton Link（rekordbox の LINK など）に BPM と拍を合わせる．後述の「Ableton Link で拍を合わせる」を参照 |
+| `-link` | 無効 | （実験）Carabiner 経由で Ableton Link（rekordbox の LINK など）に BPM と拍を合わせる．後述の「Ableton Link で拍を合わせる」を参照 |
 | `-link-addr <addr>` | `127.0.0.1:17000` | `-link` のときに接続する Carabiner の待受アドレス |
 | `-render-scale <S>` | `1.0` | シェーダーを描く解像度の倍率（0.25〜1.0）．1.0 未満なら画面 × S の大きさに描き，線形補間で拡大して出す（GPU の負荷を下げる）．このときシェーダーの `Resolution` は縮めた大きさ，`Cursor` も同じ倍率で縮めた座標になる．HUD は縮めない．制御口の state の `resolution` は画面の大きさのまま．範囲外は起動エラー |
 
@@ -239,7 +239,9 @@ go run .
 
 詳細は [ADR-008](docs/adr/ADR-008-crossfade-compositing.md) にあります．
 
-### Ableton Link で拍を合わせる（`-link`）
+### Ableton Link で拍を合わせる（`-link`，実験）
+
+> **注意**: `-link` は実機（rekordbox などの Link の相手と Carabiner）ではまだ確かめていません．確かめたのは，偽の Carabiner を使った単体テストと CI だけです．ライブで使う前に，手元で拍が合うかを確かめてください．合わないときは `-link` を外してください．タップテンポで動きます．
 
 `-link` を付けると，[Carabiner](https://github.com/Deep-Symmetry/carabiner)（Ableton Link を TCP のテキストで中継する別のプログラム）に接続し，Link のセッション（rekordbox の LINK など）の BPM と拍に合わせます．
 kagelife は Link の SDK を持たず，Carabiner とだけ話します．Carabiner は自分で入手して，kagelife を動かす機体で先に起動しておきます（`127.0.0.1` しか受け付けないため）．
