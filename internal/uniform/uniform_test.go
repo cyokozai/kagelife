@@ -26,9 +26,31 @@ func TestBuild_SetsAllUniforms(t *testing.T) {
 		"Cursor":     []float32{10, 20},
 		"Frame":      42,
 		"Random":     float32(0.75),
+		"AudioBass":  float32(0),
+		"AudioMid":   float32(0),
+		"AudioHigh":  float32(0),
+		"AudioOnset": float32(0),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v\nwant %#v", got, want)
+	}
+}
+
+// -audio 無しのとき（Input の零値）は音の uniform が 4 つとも float の 0 で入る（シェーダが参照しても落ちない）。
+// 値があればそのまま入る。
+func TestBuild_AudioUniforms(t *testing.T) {
+	b := New()
+	got := b.Build(Input{})
+	for _, name := range []string{"AudioBass", "AudioMid", "AudioHigh", "AudioOnset"} {
+		v, ok := got[name].(float32)
+		if !ok || v != 0 {
+			t.Errorf("%s = %#v, want float32(0)", name, got[name])
+		}
+	}
+	got = b.Build(Input{AudioBass: 0.1, AudioMid: 0.2, AudioHigh: 0.3, AudioOnset: 1})
+	if got["AudioBass"] != float32(0.1) || got["AudioMid"] != float32(0.2) ||
+		got["AudioHigh"] != float32(0.3) || got["AudioOnset"] != float32(1) {
+		t.Errorf("音の uniform が入らない: %#v", got)
 	}
 }
 
@@ -66,8 +88,8 @@ func TestBuild_DoesNotAllocate(t *testing.T) {
 		b.Build(in)
 	})
 	// any への格納で float32 は確保が起こり得るが、map とスライスは作り直さない。
-	// Frame（int）・Time・Beat・Random の 4 つの箱詰めを上限とする。
-	if allocs > 4 {
-		t.Errorf("allocs = %v, want <= 4", allocs)
+	// Frame（int）・Time・Beat・Random と音の 4 つ、計 8 つの箱詰めを上限とする。
+	if allocs > 8 {
+		t.Errorf("allocs = %v, want <= 8", allocs)
 	}
 }

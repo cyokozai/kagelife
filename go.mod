@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/gen2brain/malgo v0.11.28
 	github.com/hajimehoshi/ebiten/v2 v2.10.5
 	golang.org/x/image v0.47.0
 )
