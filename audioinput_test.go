@@ -102,6 +102,36 @@ func TestHUDText_Audio(t *testing.T) {
 	}
 }
 
+// 起動ログ: av-offset の行は何を遅らせるかを示し、-audio 無しの -audio-line は無視すると警告する。
+func TestAVAudioStartupLines(t *testing.T) {
+	ms := 80 * time.Millisecond
+	cases := []struct {
+		name string
+		opts options
+		want []string
+	}{
+		{"何も無し", options{}, nil},
+		{"av-offset だけ", options{avOffset: ms}, []string{"av-offset: 80ms (Beat only)"}},
+		{"マイク", options{avOffset: ms, audio: "default"}, []string{"av-offset: 80ms (Beat only)"}},
+		{"ライン入力", options{avOffset: ms, audio: "default", audioLine: true},
+			[]string{"av-offset: 80ms (Beat and audio)"}},
+		{"-audio 無しの -audio-line", options{avOffset: ms, audioLine: true}, []string{
+			"av-offset: 80ms (Beat only)",
+			"audio-line: ignored because -audio is not set",
+		}},
+		{"-audio 無しの -audio-line（av-offset 無し）", options{audioLine: true},
+			[]string{"audio-line: ignored because -audio is not set"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := avAudioStartupLines(c.opts)
+			if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 // -list-audio の出力は -list-displays に倣い、1 始まりの番号・名前・既定の印。
 func TestAudioListLines(t *testing.T) {
 	got := audioListLines([]audio.Device{{Name: "Mic A", Default: true}, {Name: "Line B"}})

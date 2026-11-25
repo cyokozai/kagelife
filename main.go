@@ -815,6 +815,26 @@ func logLLMSlots(llmSlots []string) {
 	}
 }
 
+// avAudioStartupLines は -av-offset と -audio-line について起動ログに出す行を返す。
+// av-offset の行は何を遅らせるか（-audio-line のときは音の値も）を示す。
+// -audio 無しの -audio-line は効かないので、無視することを警告する。
+func avAudioStartupLines(opts options) []string {
+	var lines []string
+	line := opts.audioLine && opts.audio != ""
+	if opts.avOffset != 0 {
+		what := "Beat only"
+		if line {
+			what = "Beat and audio"
+		}
+		lines = append(lines, fmt.Sprintf("av-offset: %dms (%s)", opts.avOffset.Milliseconds(), what))
+	}
+	if opts.audioLine && opts.audio == "" {
+		lines = append(lines, "audio-line: ignored because -audio is not set")
+	}
+
+	return lines
+}
+
 // run は制御口を起動してからゲームを回し、終了時に制御口を閉じて発見ファイルを消す。
 func run(opts options) error {
 	controlAddr, llmSlots := opts.controlAddr, opts.llmSlots
@@ -836,8 +856,8 @@ func run(opts options) error {
 	if g.renderScale < maxRenderScale {
 		log.Printf("render-scale: %.2f (shaders are drawn at the reduced size and upscaled)", g.renderScale)
 	}
-	if g.avOffset != 0 {
-		log.Printf("av-offset: %dms (Beat only)", g.avOffset.Milliseconds())
+	for _, line := range avAudioStartupLines(opts) {
+		log.Print(line)
 	}
 	if !opts.previews {
 		g.disablePreviews()

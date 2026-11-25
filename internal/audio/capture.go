@@ -110,6 +110,9 @@ func Open(spec string, latest *Latest, onStop func(error)) (c *Capture, name str
 		return nil, "", fmt.Errorf("audio: open %q: %w", name, err)
 	}
 	if err := dev.Start(); err != nil {
+		// Uninit で Stop コールバックが呼ばれうる。closing を先に立て、onStop が ErrStopped を報告して
+		// Start の本当の失敗理由（下で返す err）を上書きしないようにする
+		c.closing.Store(true)
 		dev.Uninit()
 
 		return nil, "", fmt.Errorf("audio: start %q: %w", name, err)
