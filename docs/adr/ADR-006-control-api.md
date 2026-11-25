@@ -254,7 +254,7 @@ LLM 背景スロット（PR #33、マージ済み）の契約。GUI を `-llm-sl
 
 ### 補足（2026-11-22 追加）
 
-音声入力（[ADR-009](ADR-009-audio-analysis-in-process.md)、PRD FR-180〜FR-185、kagelife: feat/audio-input）の契約。番号は補足 26 から続ける。
+音声入力（[ADR-009](ADR-009-audio-analysis-in-process.md)、PRD FR-180〜FR-185、kagelife: feat/audio-input）の契約。番号は補足 34 から続ける。
 
 34. **`features` の `audio`**: GUI を `-audio <デバイス>` で起動したときだけ `features` に `audio` を足す（名前順に並べる）。`keys`・`llm_slots` と違い、フラグ無しでは出さない（音の uniform が 0 のままであることを示す）。デバイスが開けない・途中で止まった場合も `audio` は出し続け、失敗は `last_error`（`shader` は `"-audio"`、`message` は失敗の内容）と HUD に出す。制御口に音の値を返す口は作らない（約 60Hz の値は uniform にだけ渡す）。発見ファイルの `version` は 1 のまま
 35. **音の予約 uniform**: `AudioBass`（20〜150 Hz）・`AudioMid`（150 Hz〜2 kHz）・`AudioHigh`（2〜16 kHz）は帯域のレベルを直近 10 秒の最大で割った 0〜1、`AudioOnset` は立ち上がりで 1 になり時定数 150 ms で 0 へ減る値。どれも float で、`-audio` 無し・デバイスの不調のときは 0。型違いの宣言は補足 33 と同じく描く前に弾く。`-audio-line` を付けると、音の値は `-av-offset` の分だけ遅れて uniform に出る（`Beat` と同じ遅れ）。get_kage_guide はこの 4 つを予約 uniform として返す（kagelife-mcp 側の PR）

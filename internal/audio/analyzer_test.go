@@ -122,6 +122,39 @@ func TestAnalyzer_SilenceIsZero(t *testing.T) {
 	}
 }
 
+// ±Inf が 1 標本混ざっても解析が壊れない（NaN と同じく無音として扱う）。
+// 以前は Inf が FFT で NaN になり、自動ゲインの履歴に残って 3 帯域が永久に 0 になっていた。
+func TestAnalyzer_InfIsIgnored(t *testing.T) {
+	for _, inf := range []float32{float32(math.Inf(1)), float32(math.Inf(-1))} {
+		a := NewAnalyzer(testRate)
+		src := sine(80, 0.5, secs(2), 0)
+		src[secs(0.5)] = inf
+		feed(a, src[:secs(1)], 480)
+		got := feed(a, src[secs(1):], 480) // Inf を入れてから 1 秒以上あと
+		if got.Bass < 0.5 {
+			t.Errorf("%v を混ぜた 1 秒後: Bass = %v, want >= 0.5 (%+v)", inf, got.Bass, got)
+		}
+	}
+}
+
+// 小さな白色雑音（-60 dBFS、σ≈1e-3）だけが続いても、どの帯域も 1 近くまで持ち上げない。
+// 雑音の帯域レベルはビン数の平方根に比例するので、下限が帯域で共通だと広い帯域（中・高）が持ち上がる。
+func TestAnalyzer_QuietNoiseStaysLow(t *testing.T) {
+	a := NewAnalyzer(testRate)
+	r := rand.New(rand.NewPCG(5, 6))
+	src := make([]float32, secs(12))
+	for i := range src {
+		src[i] = float32(r.NormFloat64() * 1e-3)
+	}
+	got := feed(a, src, 480)
+	t.Logf("-60 dBFS の雑音 12 秒: %+v（下限 %v）", got, a.floor)
+	for b := range numBands {
+		if v := got.band(b); v >= 0.3 {
+			t.Errorf("-60 dBFS の雑音: 帯域 %d = %v, want < 0.3 (%+v)", b, v, got)
+		}
+	}
+}
+
 // 自動ゲイン: 直近 10 秒の最大で割るので、小さい音だけが続けば 1 近くまで上がる。
 // 大きい音の後の小さい音は、大きい音が 10 秒の窓から出るまで小さいまま。
 func TestAnalyzer_AutoGain(t *testing.T) {
