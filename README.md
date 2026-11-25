@@ -180,6 +180,9 @@ go run .
 | `-link` | 無効 | （実験）Carabiner 経由で Ableton Link（rekordbox の LINK など）に BPM と拍を合わせる．後述の「Ableton Link で拍を合わせる」を参照 |
 | `-link-addr <addr>` | `127.0.0.1:17000` | `-link` のときに接続する Carabiner の待受アドレス |
 | `-render-scale <S>` | `1.0` | シェーダーを描く解像度の倍率（0.25〜1.0）．1.0 未満なら画面 × S の大きさに描き，線形補間で拡大して出す（GPU の負荷を下げる）．このときシェーダーの `Resolution` は縮めた大きさ，`Cursor` も同じ倍率で縮めた座標になる．HUD は縮めない．制御口の state の `resolution` は画面の大きさのまま．範囲外は起動エラー |
+| `-audio <デバイス>` | なし（無効） | 音を取り込み，uniform の `AudioBass`・`AudioMid`・`AudioHigh`・`AudioOnset` に出す．値は `default`（OS の既定の入力），`-list-audio` の番号，または名前の部分一致（大小を区別しない．複数に当たれば起動エラー）．後述の「音に反応させる」を参照 |
+| `-audio-line` | 無効 | `-audio` の入力をライン入力（DJ ミキサーの出力など，観客より先に届く音）として扱い，音の値を `-av-offset` の分だけ遅らせる．付けなければマイク扱いで遅らせない |
+| `-list-audio` | — | 音の入力デバイスの番号と名前を表示して終了する（ウィンドウは開かない） |
 
 ```bash
 ./kagelife -shaders ~/vj/shaders
@@ -291,6 +294,27 @@ LLM（制御口を使う MCP サーバ）が書き込むシェーダーの名前
 | `Cursor` | `vec2` | マウスカーソルの位置（ピクセル） |
 | `Frame` | `int` | 起動からのフレーム数 |
 | `Random` | `float` | フレームごとに変わる `[0, 1)` の乱数 |
+| `AudioBass` | `float` | 低域（20〜150 Hz）のレベル `0..1`．`-audio` 無しやデバイスの不調のときは 0 |
+| `AudioMid` | `float` | 中域（150 Hz〜2 kHz）のレベル `0..1` |
+| `AudioHigh` | `float` | 高域（2〜16 kHz）のレベル `0..1` |
+| `AudioOnset` | `float` | 音の立ち上がり（キックなど）で 1 になり，約 150 ms で 0 へ減る |
+
+### 音に反応させる（`-audio`）
+
+`-audio` を付けたときだけマイクやライン入力を取り込み，帯域ごとのレベルと立ち上がりを上の 4 つの uniform に毎フレーム入れます（付けなければ音のデバイスを開かず，4 つは 0 のままです）．
+
+```bash
+./kagelife -list-audio
+# audio 1: MacBook Pro Microphone (default) / audio 2: ... のように出る
+./kagelife -audio default            # OS の既定の入力（マイク）
+./kagelife -audio 2 -audio-line -av-offset 200   # 2 番をライン入力として，音の値も 200ms 遅らせる
+```
+
+- 取り込みは 48 kHz，解析は FFT 1024 点を 512 点ずつずらして行います．レベルは直近 10 秒の最大で割って `0..1` にし（自動ゲイン），上がり 10 ms・下がり 300 ms でならします．
+- `-audio-line` を付けると，音の値を `-av-offset` の分だけ遅らせます（ライン入力の音は観客に届く音より先に来るため）．マイクは会場の音をそのまま拾うので遅らせません．
+- デバイスが無い・開けない・途中で抜けたときも描画は止まりません．HUD の `Audio:` と制御口の `last_error` に出し，4 つの uniform は 0 に戻ります．`-audio` を付けて起動したときだけ，制御口の state の `features` に `audio` が載ります．
+- BPM は音から推定しません（タップと `-link` だけ）．
+- macOS のマイクの利用許可は，配布物が `.app` ではなく素のバイナリなので，起動したターミナルのアプリ（Terminal・iTerm2 など）に付く見込みです（未確認．初回に許可のダイアログが出ます．拒否したときは「システム設定 → プライバシーとセキュリティ → マイク」でそのアプリを許可してください）．
 
 ### 最小のシェーダー例
 

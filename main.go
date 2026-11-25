@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyokozai/kagelife/internal/audio"
 	"github.com/cyokozai/kagelife/internal/carabiner"
 	"github.com/cyokozai/kagelife/internal/control"
 	"github.com/cyokozai/kagelife/internal/filewatcher"
@@ -85,6 +86,9 @@ type Game struct {
 
 	// link は -link の拍時計（nil なら無効）。同期中は BPM と Beat を Link から取る。
 	link *linkClock
+
+	// audio は -audio の音の入力（nil なら無効。音の uniform は 0）。
+	audio *audioInput
 
 	// cursor は全画面のあいだカーソルを隠す。
 	cursor cursorSync
@@ -276,6 +280,7 @@ type hudState struct {
 	Mix       float32
 	AVOffset  time.Duration // 0 なら出さない
 	Link      string        // -link の状態（空なら出さない）
+	Audio     string        // -audio のデバイス名か失敗（空なら出さない）
 	Perf      *perfState    // 有れば状態行の次に fps とフレーム時間の最大値の行を出す
 	Errs      map[string]error
 	LLMSlots  []string // 有ればキー 8・9 の行を状態行の次に出す
@@ -293,6 +298,9 @@ func hudText(st hudState) string {
 	}
 	if st.Link != "" {
 		status += "  Link: " + st.Link
+	}
+	if st.Audio != "" {
+		status += "  Audio: " + st.Audio
 	}
 	lines := []string{status}
 	if st.Perf != nil {
@@ -375,6 +383,12 @@ type options struct {
 	link bool
 	// linkAddr は -link-addr（Carabiner の待受アドレス）。
 	linkAddr string
+	// audio は -audio（入力デバイスの指定。空なら無効）。
+	audio string
+	// audioLine は -audio-line（ライン入力として -av-offset の分だけ音の値を遅らせる）。
+	audioLine bool
+	// listAudio は -list-audio（入力デバイスの一覧を出して終了する）。
+	listAudio bool
 }
 
 // parseFlags は args（プログラム名を除く）を解釈する。エラーと使い方は標準エラーに出す。
@@ -430,6 +444,11 @@ func parseFlagsTo(args []string, out io.Writer) (options, error) {
 	fs.BoolVar(&opts.link, "link", false,
 		"Carabiner 経由で Ableton Link に BPM と拍を合わせる（Carabiner は別に起動しておく）。同期中はタップと set_bpm より Link を優先する")
 	fs.StringVar(&opts.linkAddr, "link-addr", carabiner.DefaultAddr, "-link のときに接続する Carabiner の待受アドレス")
+	fs.StringVar(&opts.audio, "audio", "",
+		"音を取り込む入力デバイス（default、-list-audio の番号、または名前の部分一致）。AudioBass・AudioMid・AudioHigh・AudioOnset の uniform に出す。既定は無効")
+	fs.BoolVar(&opts.audioLine, "audio-line", false,
+		"-audio の入力をライン入力として扱い、音の値を -av-offset の分だけ遅らせる（既定はマイク扱いで遅らせない）")
+	fs.BoolVar(&opts.listAudio, "list-audio", false, "音の入力デバイスの番号と名前を出力して終了する")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -584,6 +603,7 @@ func (g *Game) drawShaders(screen *ebiten.Image, shader *ebiten.Shader) {
 		Beat:    g.beatPhase(now),
 		Frame:   g.frame,
 		Random:  rand.Float32(),
+		Audio:   g.audioLevels(now),
 	})
 
 	// プレビューは本番と同じ uniform で、本番の描画を積む前に描いて読み出す。
@@ -663,7 +683,26 @@ func (g *Game) hudState(now time.Time) hudState {
 		Errs:     g.errs,
 		LLMSlots: g.llmSlots,
 		Link:     g.linkHUD(),
+		Audio:    g.audioHUD(),
 	}
+}
+
+// audioLevels は now のフレームの音の値。-audio 無しなら 0。
+func (g *Game) audioLevels(now time.Time) audio.Levels {
+	if g.audio == nil {
+		return audio.Levels{}
+	}
+
+	return g.audio.step(now)
+}
+
+// audioHUD は HUD に出す音の状態。-audio 無しなら空。
+func (g *Game) audioHUD() string {
+	if g.audio == nil {
+		return ""
+	}
+
+	return g.audio.hudText()
 }
 
 // linkHUD は HUD に出す Link の状態。-link 無しなら空。
@@ -728,6 +767,16 @@ func main() {
 	// -version はウィンドウを開かずに終わる（ディスプレイの無い環境でも動くように、ウィンドウ設定より前で返す）
 	if opts.version {
 		fmt.Println(versionString())
+
+		return
+	}
+
+	// -list-audio もウィンドウを開かずに終わる（malgo の文脈を作って入力デバイスを並べる）
+	if opts.listAudio {
+		if err := printAudioDevices(os.Stdout); err != nil {
+			log.Print(err)
+			os.Exit(2)
+		}
 
 		return
 	}
@@ -800,6 +849,15 @@ func run(opts options) error {
 		defer func() { _ = client.Close() }()
 		g.link = newLinkClock(est)
 		log.Printf("link: enabled (Carabiner %s; tap tempo is used until Link has peers)", opts.linkAddr)
+	}
+
+	if opts.audio != "" {
+		// 開けなくても描画は止めない（FR-184）。features の audio はこのビルドの機能として出し続ける
+		g.audio = newAudioInput(opts.audio, opts.audioLine, opts.avOffset)
+		g.audio.record = func(msg string) { g.eng.RecordError("-audio", msg) }
+		g.audio.start()
+		defer g.audio.close()
+		g.eng.Audio = true
 	}
 
 	ctl, err := control.Start(control.Config{

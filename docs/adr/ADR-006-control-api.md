@@ -75,7 +75,7 @@ kagelife の feat/mcp-control-api（GUI 側）と kagelife-mcp の feat/mcp-stdi
 `last_error` は `{"shader":"x","message":"..."}` または null（ファイル監視経由のコンパイル失敗も含む最新のもの。寿命は補足 8、`message` の形は経路で異なる: 補足 18）。`active` はシェーダ 0 本なら `""`。
 `shaders` はファイル名順で、コンパイルに失敗したファイルも含む（補足 16）。
 `bpm` は常に 40〜300 で、0（未設定）にはならない。タップ前は既定の 120（[ADR-008](ADR-008-crossfade-compositing.md) D3）。`bpm_measured` は、`bpm` が既定値のままなら false、タップまたは `POST /v1/bpm` で設定された値なら true（`tempo.Tapper.Measured()` に当たる）。
-`features` は常に配列で、GUI が持つ任意機能の snake_case の名前を並べる（補足 20）。今は `["keys","llm_slots","previews"]`（名前順）で、`-llm-slots` を付けずに起動しても同じ（ビルドが機能を持つことだけを示す。補足 21・27）。`-previews=false` のときだけ `previews` を出さない（補足 32）。
+`features` は常に配列で、GUI が持つ任意機能の snake_case の名前を並べる（補足 20）。今は `["keys","llm_slots","previews"]`（名前順）で、`-llm-slots` を付けずに起動しても同じ（ビルドが機能を持つことだけを示す。補足 21・27）。`-previews=false` のときだけ `previews` を出さない（補足 32）。`-audio` を付けて起動したときだけ `audio` を足す（補足 34）。
 `llm_slots` は `-llm-slots` の予約名をフラグの順に並べた配列で、フラグ無しなら `[]`（null にしない。補足 22）。
 
 #### GET /v1/shaders/{name}
@@ -153,7 +153,7 @@ body `{"key":"1","shift":false}`（`shift` は省略可、既定 false）→ 200
     - 割り当てはあるがコンパイルに失敗したスロットのキーは、キーボードと同じく何もしないで 200 を返す。戻り先が無いときのキー 0 も同じ。実際に切り替わったかは `GET /v1/state` で確かめる
 31. **実装の注記（契約ではない）**: 9 個を 1 枚の 216×216 のアトラスに描き、GPU からの読み出しは 1 プレビューフレームにつき 1 回。読み出し（`ReadPixels`）は積んである描画命令をすべて流して待つので、Draw の中で本番の描画を積む前に行う。JPEG の符号化はゲームループの外（別 goroutine）で行い、符号化が終わるまで次のプレビューを描かない。セルとアトラスの画像は Ebitengine の内部のテクスチャアトラスに載せない（`Unmanaged`）。載せると `dstPos` に詰めた位置が足され、`dstPos / Resolution` で座標を出すシェーダの絵がずれる
 32. **`-previews` フラグ**: GUI の `-previews`（既定 true）を false にすると、プレビューを描かず、`GET /v1/previews` は 404 `not_found`、`features` に `previews` を出さない。デッキは `features` を見て、キーの表示を文字に戻す。`keys` は止めない（`-previews=false` でも `POST /v1/keys` は使える）
-33. **予約 uniform の型違い**: 予約 uniform の名前で型の違う宣言（例: `var Time vec2`、`var Resolution vec3`）は Kage のコンパイルを通るが、Ebitengine は描くときに panic する。GUI はこれを描く前に弾き、コンパイル失敗と同じに扱う。型は `Time`・`Beat`・`Random` が float、`Frame` が int、`Resolution`・`Cursor` が vec2
+33. **予約 uniform の型違い**: 予約 uniform の名前で型の違う宣言（例: `var Time vec2`、`var Resolution vec3`）は Kage のコンパイルを通るが、Ebitengine は描くときに panic する。GUI はこれを描く前に弾き、コンパイル失敗と同じに扱う。型は `Time`・`Beat`・`Random`・`AudioBass`・`AudioMid`・`AudioHigh`・`AudioOnset` が float、`Frame` が int、`Resolution`・`Cursor` が vec2
     - ファイル監視の読み込み・再読込: 1×1 に試し描きして panic すれば、コンパイル失敗と同じ（旧シェーダのまま、新しいファイルは nil のスロット、`last_error` に記録）。`message` に uniform の型が合わないことを書く
     - PUT: コンパイルの後、書く前にゲームループで試し描きする。型違いなら 422 `compile_error`（ファイルにも Manager にも触れない。`diagnostics` は位置不明として line 0 / col 0 の 1 件）。このため PUT はゲームループを 1 回多く待つ（`-llm-slots` 付きなら最大 4 回）。ループが止まっていて試し描きできなければ飛ばして書き、差し替えの処理でもう一度確かめる（そこで型違いなら 422 で、ファイルは書いてあるが Manager には入らない。ファイル監視の再読込でもコンパイル失敗になる）
     - プレビュー: それでも描くときに panic したキーは、そのキーだけ `compile_error: true`・`jpeg: null` にして、他のキーは描き続ける
@@ -166,6 +166,7 @@ body `{"key":"1","shift":false}`（`shift` は省略可、既定 false）→ 200
 
 ### Kage の予約 uniform（GUI が毎フレーム渡す）
 `Time float` / `Resolution vec2` / `Beat float`（拍内位相 0〜1） / `Cursor vec2` / `Frame int` / `Random float`
+音（2026-11-22 追加、補足 35）: `AudioBass float` / `AudioMid float` / `AudioHigh float` / `AudioOnset float`（どれも 0〜1。`-audio` 無しは 0）
 
 ### エラーコード一覧
 
@@ -250,6 +251,13 @@ LLM 背景スロット（PR #33、マージ済み）の契約。GUI を `-llm-sl
     - `fade.fading` が true で、`fade.target` が `name`。フェードしていない間の `fade.target` の名残は映っていない扱いにする
 25. **予約名が 1 個のとき・ループが止まっているとき**: 予約名は 1 個でもよいが、映っている間はその名前に書けない（409）ので、2 個を勧める（GUI も起動ログで勧める）。ゲームループが止まっているとき、予約名への PUT は 1 回目の 409 の判定で 503 `loop_timeout` になり、ファイルを書かない。予約名以外への PUT はループを待たないので、止まっていても 403 `forbidden_name` を返す
 26. **PUT の待ち時間と 503**: `-llm-slots` を付けたときの PUT は、ゲームループを最大 4 回待ちうる（映っているかの判定 2 回、書く前の試し描き 1 回（補足 33）、Manager への差し替え 1 回）。待つたびに上限は 2 秒なので、ループが遅いと応答まで最大でおよそ 8 秒かかる。試し描きの待ちが上限を超えても 503 にはせず、試し描きを飛ばして先へ進む。503 になるのは判定の待ちと差し替えの待ちだけである。補足 11（503 でもファイルは書き込み済み）が当てはまるのは差し替えの待ちで 503 になった場合だけで、判定の待ち（1 回目・2 回目のどちらでも）で 503 になった場合はファイルを書いていない。クライアントは 503 からはどちらかを区別できないので、必要なら GET /v1/shaders/{name} でソースを確かめる
+
+### 補足（2026-11-22 追加）
+
+音声入力（[ADR-009](ADR-009-audio-analysis-in-process.md)、PRD FR-180〜FR-185、kagelife: feat/audio-input）の契約。番号は補足 26 から続ける。
+
+34. **`features` の `audio`**: GUI を `-audio <デバイス>` で起動したときだけ `features` に `audio` を足す（名前順に並べる）。`keys`・`llm_slots` と違い、フラグ無しでは出さない（音の uniform が 0 のままであることを示す）。デバイスが開けない・途中で止まった場合も `audio` は出し続け、失敗は `last_error`（`shader` は `"-audio"`、`message` は失敗の内容）と HUD に出す。制御口に音の値を返す口は作らない（約 60Hz の値は uniform にだけ渡す）。発見ファイルの `version` は 1 のまま
+35. **音の予約 uniform**: `AudioBass`（20〜150 Hz）・`AudioMid`（150 Hz〜2 kHz）・`AudioHigh`（2〜16 kHz）は帯域のレベルを直近 10 秒の最大で割った 0〜1、`AudioOnset` は立ち上がりで 1 になり時定数 150 ms で 0 へ減る値。どれも float で、`-audio` 無し・デバイスの不調のときは 0。型違いの宣言は補足 33 と同じく描く前に弾く。`-audio-line` を付けると、音の値は `-av-offset` の分だけ遅れて uniform に出る（`Beat` と同じ遅れ）。get_kage_guide はこの 4 つを予約 uniform として返す（kagelife-mcp 側の PR）
 
 ---
 

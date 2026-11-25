@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cyokozai/kagelife/internal/audio"
 	"github.com/cyokozai/kagelife/internal/uniform"
 )
 
@@ -47,6 +48,7 @@ type frameParams struct {
 	Beat             float32
 	Frame            int
 	Random           float32
+	Audio            audio.Levels // -audio 無しなら零値
 }
 
 // shaderInput はシェーダーに渡す uniform の値を組み立てる。
@@ -63,6 +65,11 @@ func shaderInput(p frameParams) uniform.Input {
 		CursorY: int(math.Round(float64(p.CursorY) * p.Scale)),
 		Frame:   p.Frame,
 		Random:  p.Random,
+
+		AudioBass:  p.Audio.Bass,
+		AudioMid:   p.Audio.Mid,
+		AudioHigh:  p.Audio.High,
+		AudioOnset: p.Audio.Onset,
 	}
 }
 

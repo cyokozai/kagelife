@@ -19,7 +19,7 @@ import (
 func drawShaderSafe(dst *ebiten.Image, w, h int, sh *ebiten.Shader, uniforms map[string]any) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("uniform の型がこのアプリの渡す値と合わない（Time・Beat・Random は float、Frame は int、Resolution・Cursor は vec2）: %v", r)
+			err = fmt.Errorf("uniform の型がこのアプリの渡す値と合わない（Time・Beat・Random・AudioBass・AudioMid・AudioHigh・AudioOnset は float、Frame は int、Resolution・Cursor は vec2）: %v", r)
 		}
 	}()
 	dst.DrawRectShader(w, h, sh, &ebiten.DrawRectShaderOptions{Uniforms: uniforms})

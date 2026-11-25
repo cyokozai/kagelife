@@ -10,6 +10,9 @@ type Input struct {
 	CursorX, CursorY int     // カーソルの位置（画素）
 	Frame            int     // フレーム番号
 	Random           float32 // 0〜1 の乱数
+
+	// 音の帯域レベルとオンセット（0〜1）。-audio 無しやデバイスの不調のときは 0（ADR-009）。
+	AudioBass, AudioMid, AudioHigh, AudioOnset float32
 }
 
 // Builder は Uniform の map を使い回して組み立てる。ゲームループのゴルーチンからだけ使うこと。
@@ -41,6 +44,10 @@ func (b *Builder) Build(in Input) map[string]any {
 	b.m["Beat"] = in.Beat
 	b.m["Frame"] = in.Frame
 	b.m["Random"] = in.Random
+	b.m["AudioBass"] = in.AudioBass
+	b.m["AudioMid"] = in.AudioMid
+	b.m["AudioHigh"] = in.AudioHigh
+	b.m["AudioOnset"] = in.AudioOnset
 
 	return b.m
 }

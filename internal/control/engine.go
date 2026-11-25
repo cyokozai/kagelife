@@ -71,6 +71,8 @@ type Engine struct {
 	Validate func(shadermgr.Shader) error
 	// NoPreviews は -previews=false。true なら features に previews を出さない（ServerConfig.Previews も nil にする）。
 	NoPreviews bool
+	// Audio は -audio で音の取り込みが有効。true なら features に audio を出す（デバイスが止まっても出し続ける）。
+	Audio bool
 
 	lastErr *LastError
 }

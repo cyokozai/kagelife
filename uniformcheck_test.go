@@ -20,7 +20,28 @@ const (
 	badResolutionKage = "//kage:unit pixels\npackage main\nvar Resolution vec3\n" +
 		"func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 { return vec4(Resolution.x, 0, 0, 1) }\n"
 	syntaxErrorKage = "//kage:unit pixels\npackage main\nfunc Fragment(\n"
+	// 音の予約 uniform（AudioBass など）も型違いは panic する。-audio 無しでも float の 0 を渡すので検査の対象。
+	badAudioKage = "//kage:unit pixels\npackage main\nvar AudioBass vec2\n" +
+		"func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 { return vec4(AudioBass.x, 0, 0, 1) }\n"
+	goodAudioKage = "//kage:unit pixels\npackage main\nvar AudioBass float\nvar AudioMid float\nvar AudioHigh float\nvar AudioOnset float\n" +
+		"func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 { return vec4(AudioBass, AudioMid, AudioHigh, AudioOnset) }\n"
 )
+
+// 音の予約 uniform の型違いもコンパイル失敗にし、正しい型なら通す。
+func TestCheckedCompiler_AudioUniforms(t *testing.T) {
+	sh, err := checkedCompiler([]byte(goodAudioKage))
+	if err != nil || sh == nil {
+		t.Fatalf("Audio* float: sh=%v err=%v", sh, err)
+	}
+	sh.Dispose()
+	sh, err = checkedCompiler([]byte(badAudioKage))
+	if err == nil || sh != nil {
+		t.Errorf("AudioBass vec2: sh=%v err=%v, want nil and error", sh, err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "Audio") {
+		t.Errorf("err = %q, want it to mention Audio", err)
+	}
+}
 
 func mustNewShader(t *testing.T, src string) *ebiten.Shader {
 	t.Helper()

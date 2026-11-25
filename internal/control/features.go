@@ -21,17 +21,22 @@ func Features() []string {
 	return out
 }
 
-// features は state に出す features。NoPreviews なら previews を除く。
+// FeatureAudio は -audio で音が有効なときだけ features に出す名前（ADR-009、FR-185）。
+// 音の uniform（AudioBass・AudioMid・AudioHigh・AudioOnset）が動いていることを示す。
+const FeatureAudio = "audio"
+
+// features は state に出す features。NoPreviews なら previews を除き、Audio なら audio を足す。
 func (e *Engine) features() []string {
 	all := Features()
-	if !e.NoPreviews {
-		return all
-	}
 	out := all[:0]
 	for _, f := range all {
-		if f != "previews" {
+		if f != "previews" || !e.NoPreviews {
 			out = append(out, f)
 		}
+	}
+	if e.Audio {
+		out = append(out, FeatureAudio)
+		sort.Strings(out)
 	}
 
 	return out
