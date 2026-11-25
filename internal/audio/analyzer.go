@@ -23,8 +23,9 @@ const (
 	// onsetTau はオンセットの値が 1 から 0 へ減る時定数（秒）。
 	onsetTau = 0.150
 
-	// gainFloor は自動ゲインの分母の下限。無音や小さな雑音を 1 まで持ち上げないため。
+	// gainFloor は低域の自動ゲインの分母の下限。無音や小さな雑音を 1 まで持ち上げないため。
 	// 振幅 0.001（-60 dBFS）の正弦波の帯域レベルがおよそこの値になる。
+	// 中域・高域の下限は帯域のビン数に応じて大きくする（NewAnalyzer の floor を参照）。
 	gainFloor = 1e-3
 	// fluxGain はオンセット検出で振幅を対数に圧縮するときの係数（log1p(fluxGain*m)）。
 	fluxGain = 1000
@@ -83,6 +84,7 @@ type Analyzer struct {
 	prevLog  []float64 // 前回の log1p(fluxGain*m)
 	fluxBins int       // flux を数えるビンの上限（16 kHz まで）
 
+	floor   [numBands]float64 // 帯域ごとの自動ゲインの分母の下限
 	raw     [numBands]float64 // 直近の帯域レベル（自動ゲインの前）
 	hist    [numBands][]float64
 	histPos int
@@ -129,6 +131,19 @@ func NewAnalyzer(rate int) *Analyzer {
 			a.fluxBins = k + 1
 		}
 	}
+	// 帯域の下限 = gainFloor × sqrt(その帯域のビン数 / 低域のビン数)。
+	// 白色雑音の帯域レベル（ビンのエネルギーの和の平方根）はビン数の平方根に比例して増えるので、
+	// 下限が共通だと、ビンの多い中域・高域ほど小さな雑音が 1 近くまで持ち上がる。
+	var bins [numBands]int
+	for _, b := range a.binBand {
+		if b >= 0 {
+			bins[b]++
+		}
+	}
+	lowBins := float64(max(1, bins[bandLow]))
+	for b := range numBands {
+		a.floor[b] = gainFloor * math.Sqrt(max(1, float64(bins[b]))/lowBins)
+	}
 	n := max(1, int(math.Ceil(autoGainWindow/hop)))
 	for b := range a.hist {
 		a.hist[b] = make([]float64, n)
@@ -142,7 +157,9 @@ func NewAnalyzer(rate int) *Analyzer {
 func (a *Analyzer) Write(samples []float32) Levels {
 	base := FFTSize - HopSize
 	for _, s := range samples {
-		if math.IsNaN(float64(s)) { // NaN は無音として扱う
+		// NaN と ±Inf は無音として扱う。Inf を FFT に通すと NaN になり、自動ゲインの履歴に残って
+		// 3 帯域が窓の長さを過ぎても 0 のままになるため
+		if f := float64(s); math.IsNaN(f) || math.IsInf(f, 0) {
 			s = 0
 		}
 		a.buf[base+a.pos] = s
@@ -187,7 +204,7 @@ func (a *Analyzer) analyze() {
 	for b := range numBands {
 		a.raw[b] = math.Sqrt(energy[b])
 		a.hist[b][a.histPos] = a.raw[b]
-		ref := gainFloor
+		ref := a.floor[b]
 		for _, v := range a.hist[b] {
 			ref = max(ref, v)
 		}
