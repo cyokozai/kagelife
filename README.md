@@ -180,7 +180,7 @@ go run .
 | `-link` | 無効 | （実験）Carabiner 経由で Ableton Link（rekordbox の LINK など）に BPM と拍を合わせる．後述の「Ableton Link で拍を合わせる」を参照 |
 | `-link-addr <addr>` | `127.0.0.1:17000` | `-link` のときに接続する Carabiner の待受アドレス |
 | `-render-scale <S>` | `1.0` | シェーダーを描く解像度の倍率（0.25〜1.0）．1.0 未満なら画面 × S の大きさに描き，線形補間で拡大して出す（GPU の負荷を下げる）．このときシェーダーの `Resolution` は縮めた大きさ，`Cursor` も同じ倍率で縮めた座標になる．HUD は縮めない．制御口の state の `resolution` は画面の大きさのまま．範囲外は起動エラー |
-| `-audio <デバイス>` | なし（無効） | 音を取り込み，uniform の `AudioBass`・`AudioMid`・`AudioHigh`・`AudioOnset` に出す．値は `default`（OS の既定の入力），`-list-audio` の番号，または名前の部分一致（大小を区別しない．複数に当たれば起動エラー）．後述の「音に反応させる」を参照 |
+| `-audio <デバイス>` | なし（無効） | 音を取り込み，uniform の `AudioBass`・`AudioMid`・`AudioHigh`・`AudioOnset` に出す．値は `default`（OS の既定の入力），`-list-audio` の番号，または名前の部分一致（大小を区別しない．複数に当たる・どれにも当たらないときは HUD と制御口の `last_error` に出し，音なしで描画を続ける）．後述の「音に反応させる」を参照 |
 | `-audio-line` | 無効 | `-audio` の入力をライン入力（DJ ミキサーの出力など，観客より先に届く音）として扱い，音の値を `-av-offset` の分だけ遅らせる．付けなければマイク扱いで遅らせない |
 | `-list-audio` | — | 音の入力デバイスの番号と名前を表示して終了する（ウィンドウは開かない） |
 
