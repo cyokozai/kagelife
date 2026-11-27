@@ -347,6 +347,8 @@ LLM が曲に合わせて自分から演出を変えるための構成（2026-10
 | [ADR-008](adr/ADR-008-crossfade-compositing.md) | クロスフェードと合成 — 画面外合成 ＋ 積算による進行 | Accepted |
 | [ADR-009](adr/ADR-009-audio-analysis-in-process.md) | 音声解析の置き場所 — 本体に同居（`-audio` を付けたときだけ有効）、重い解析は外部クライアント | Accepted |
 | [ADR-010](adr/ADR-010-autonomous-conductor.md) | 自律演出の位置づけ（LLM は予約、GUI が拍で実行、人が優先） | Accepted |
+| [ADR-011](adr/ADR-011-media-assets.md) | メディア素材（画像・GIF・SVG・動画・WAV）の読み込みとシェーダからの使い方 | 提案 |
+| [ADR-012](adr/ADR-012-fonts.md) | フォントの追加 — まず Google Fonts の日本語・英語 | 提案 |
 
 ### システム全体構成図（段階 3 追加後）
 
