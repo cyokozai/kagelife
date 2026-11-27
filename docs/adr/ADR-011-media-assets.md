@@ -177,9 +177,12 @@ A と B は別々の描画なので、クロスフェード中は A と B がそ
 **案**: 先に S1。演出の幅を広げるなら S3 を後に足す。
 
 ### mp4（H.264）
-Go だけで H.264 を一般に復号できるライブラリは、調べた範囲では見つからなかった。
+Go だけで H.264 を復号するライブラリは少なく、対応範囲もまちまちである。
+- `liqMix/govid`: 純 Go で、I/P/B フレームと High profile まで対応すると README にある（下の V7）
 - `Eyevinn/hi264`: 純 Go の H.264 復号器だが、IDR と P_Skip のフレームだけ（https://pkg.go.dev/github.com/Eyevinn/hi264 ）
 - `y9o/go-openh264`: purego で cgo を避けるが、実行時に OpenH264 の共有ライブラリが要る（https://pkg.go.dev/github.com/y9o/go-openh264 ）
+
+Ebitengine の作者は、本体に動画の機能を入れる予定は無いこと、ffmpeg は LGPL で Ebitengine のライセンスと衝突すること、公式の例は MPEG-1 だけであることを Issue で示している（https://github.com/hajimehoshi/ebiten/issues/905 、https://github.com/hajimehoshi/ebiten/issues/110 、https://github.com/hajimehoshi/ebiten/issues/3065 ）。動画は本体の外のライブラリか外部プロセスに頼ることになる。
 
 手段の候補:
 - **V1 ffmpeg を外部プロセスにして生のフレームを受ける**: `ffmpeg -i in.mp4 -f rawvideo -pix_fmt rgba -s WxH -` の出力をパイプで読む
@@ -195,13 +198,40 @@ Go だけで H.264 を一般に復号できるライブラリは、調べた範�
   - 全フレームを持たずにディスクから毎フレーム復号するなら、メモリは減るが、jpg・png の復号の CPU のコストが毎フレームかかる（未測定）。連番画像のディスク上の容量は確かめていない
 - **V4 OS の復号器（macOS の VideoToolbox、Linux の VA-API など）**: OS ごとに別のコードになり、ADR-003 の 4 ターゲットで同じ作りという方針から外れる。手間が最も大きい
 - **V5 go-openh264**: 実行時に共有ライブラリが要る。対応するプロファイルは確かめていない
+- **V6 `shibukawa/hwmediacodec` の ebitenvideo**（https://github.com/shibukawa/hwmediacodec 、Apache-2.0、最終の push は 2026-11-21、星 11）: OS のハードウェア復号（macOS の VideoToolbox、Linux の VA-API、Windows の Media Foundation / NVDEC）を purego で呼ぶ。H.264・HEVC・AV1
+  - README で確かめたこと: `CGO_ENABLED=0 go build` で通る。`player.Image()` は `*ebiten.Image` で、`DrawRectShader` の source に渡せる。`examples/texture` がある
+  - メリット: mp4 をそのまま置ける。cgo を増やさない。ハードウェア復号なので CPU の計算量が小さい見込み
+  - デメリット: 1A を取るなら、動画の大きさが描画先と違えば描き直しが要る（`image.go:1098`）。Linux では libva2・libva-drm2 と GPU の VA ドライバが要り、Linux の AAC 音声には libavcodec か libfdk-aac が要る（別の調査の報告。未確認）。go.mod は go 1.27.0・Ebitengine v2.10.4 を要求する（報告。未確認。kagelife は go 1.27.3・v2.10.5 なので満たす見込み）。Linux arm64 の実機の検証は README で空欄か ⚠️（報告。未確認）。OS ごとに振る舞いが違いうるので、ADR-003 の 4 ターゲットで同じ動きになるかは確かめる必要がある
+- **V7 `liqMix/govid`**（https://github.com/liqMix/govid 、LICENSE の本文は MIT（GitHub の API では NOASSERTION）、最終の push は 2026-07-26、星 4）: 純 Go のソフトウェア復号。cgo も ffmpeg も要らない。H.264（CAVLC / CABAC、I / P / B、High profile。ffmpeg とビット単位で一致すると README で自己申告）、VP8 / WebM、MPEG-1
+  - README で確かめたこと: 「720p30 の実時間再生に足りる」。H.264 の 1 フレームの復号が 60 TPS の 1 tick の大半を使うので、`NewAsyncPlayer` で別のスレッドで復号する。インターレースと 4:2:2 / 4:4:4 には対応しない。README の冒頭に「This repo is written by Claude.」とある
+  - 報告（未確認）: リリースが無い。Ebitengine 用の橋（`ebitengine/` パッケージ）がある。音声の対応は未確認
+  - メリット: mp4 をそのまま置け、依存は Go のモジュール 1 つで済む。外部のライブラリもドライバも要らず、4 ターゲットで同じ動きになる見込み
+  - デメリット: CPU の計算量が重い。1080p や、複数の動画を同時に流す場合に足りるかは分からない。描画のゲームループと CPU を取り合う
+- **V8 `bstkhq/go-avebi`**（https://github.com/bstkhq/go-avebi 、旧 erparts/go-avebi、MIT、最終の push は 2026-09-03、星 2）: purego で FFmpeg 6〜9 の共有ライブラリを実行時に読む。利用者が FFmpeg の .so / .dylib / .dll を用意する
+  - 報告（未確認）: mp4・H.264 / AAC で実機の検証があり、`examples/mediaplayer` がある。Ebitengine 2.9.9 を対象にしている
+  - メリット: mp4 をそのまま置け、FFmpeg が読める形式はほぼ扱える。cgo を増やさない。V1 と違い、フレームをプロセス間で受け渡さない
+  - デメリット: 本番の機材に FFmpeg の共有ライブラリ（版 6〜9）が要る。FFmpeg の共有ライブラリは LGPL か GPL かがビルドによるので、配布物に同梱するなら扱いを確かめる必要がある
+- **その他（弱い候補）**:
+  - ebiten-gstreamer: GStreamer が要る
+  - hajimehoshi/webmplayer: libvpx が要る。作者が本番で使わないよう書いている
+  - tinne26/mpegg・mpg-go: MPEG-1 だけで、V2 と同じ種類
+  - reisen: アーカイブ済み
+  - go-astiav・go-gst・go-mpv: バインディングだけで、`*ebiten.Image` への変換は自分で書く
+
+V6〜V8 は、どれも星が 2〜11 と少なく、長期の保守の実績は確かめられていない。kagelife ではどれも動かしていない。
 
 **フレームの同期とメモリ（どの案でも）**:
 - 復号は goroutine で行い、最新のフレームだけを `Update()` に渡す（ADR-002 の channel の形。ADR-009 の受け渡しと同じ）。古いフレームは捨て、描画の速さを復号に引きずらせない
 - アップロードは `WritePixels`。1920×1080 の RGBA は 1 フレーム 8,294,400 バイトで、30 fps なら約 249 MB/s（計算値）。YCbCr 4:2:0 のまま上げてシェーダで RGB に直すと 1 画素 1.5 バイトで約 93 MB/s（計算値。Ebitengine の例はこの形。`examples/video/mpegplayer.go:33-43`）
 - fps への影響は**測っていない**。実装 PR で 1080p・720p を測る
 
-**案**: mp4 をそのまま置けることを優先するなら V1、本番の機材を増やさないことを優先するなら V2。どちらを取るかは依頼者が決める。V1 を取る場合も、ffmpeg が見つからなければ動画のスロットだけを空にし、描画は止めない。
+**案**: 次の 4 つを並べ、どれを取るかは依頼者が決める。
+- V1: mp4 のまま。本番の機材に ffmpeg が要る。外部プロセス
+- V2: 事前に MPEG-1 へ変換。本番で何も要らない。純 Go
+- V6: mp4 のまま。cgo なし。ハードウェア復号で CPU が軽い見込み。Linux ではドライバが要る
+- V7: mp4 のまま。依存は Go のモジュールだけ。ソフトウェア復号で CPU の計算量が重い
+
+V6・V7 は保守の実績が確かめられておらず、kagelife で動かしていない。取る前に、本番の機材で 1080p・720p を動かして fps を測る。どれを取る場合も、復号できなければ動画のスロットだけを空にし、描画は止めない。
 
 ### wav
 wav は映像ではなく音声である。用途の候補:
@@ -282,7 +312,7 @@ kagelife-shaders にはライセンスが付いておらず、原作のあるプ
 ```mermaid
 flowchart LR
     S1["段階 1（案）\npng・jpg・GIF\n渡し方・指定方法\n寿命・プレビュー"] --> S2["段階 2（案）\nフォント（ADR-012）\nSVG のラスタ化（S1）"]
-    S2 --> S3["段階 3（案）\n動画（V1 か V2）"]
+    S2 --> S3["段階 3（案）\n動画（V1・V2・V6・V7 から）"]
     S2 -.-> S4["後で（案）\nSDF（S3）\nwav（用途の決定後）"]
 ```
 
@@ -295,7 +325,7 @@ flowchart LR
 - 論点 1: 1A。はめた矩形と進行度は uniform で渡す
 - 論点 2: 2-1（シェーダが座標を変換する）
 - 論点 3: 3A（シェーダのコメントで指定）。相対パスの基準は `.kage` のディレクトリ。`-shaders` の外は指せない
-- 論点 4: png・jpg・GIF は標準ライブラリ。SVG は S1（oksvg を直接依存に足す）。動画は V1 か V2。wav は用途の決定待ち
+- 論点 4: png・jpg・GIF は標準ライブラリ。SVG は S1（oksvg を直接依存に足す）。動画は V1・V2・V6・V7 のどれか（依頼者が選ぶ）。wav は用途の決定待ち
 - 論点 6: A・B と小さい素材を先読みし、間に合わなければ空で切り替える
 - 論点 7: プレビューは 1 枚目のフレームを 72×72 で持つ
 - 論点 8: 素材からシェーダへの逆引き表を持つ
@@ -310,7 +340,7 @@ flowchart LR
 **ネガティブ**:
 - 独自のコメントの書式が 1 つ増える
 - `shadermgr` のスロットの値が「シェーダと素材の組」になり、`ShaderAt`・`ActiveB`・`previewTargets`・試し描き・制御口の `write_shader` の扱いを直す
-- SVG と動画で依存（oksvg、gen2brain/mpeg）か外部プロセス（ffmpeg）が増える
+- SVG と動画で依存（oksvg、gen2brain/mpeg・hwmediacodec・govid のどれか）か外部のもの（ffmpeg、FFmpeg の共有ライブラリ、Linux の VA ドライバ）が増える
 - 素材の分だけ GPU のメモリを使う。クロスフェード中は最大 8 枚。GIF と動画は毎フレームの描き直しとアップロードが増える
 - ファイル監視に素材の拡張子と逆引き表が加わる
 
@@ -324,6 +354,9 @@ flowchart LR
 - VJ のループ素材の長さ（数秒〜十数秒は仮定）と、連番画像のディスク上の容量
 - oksvg が対応する SVG の範囲と保守の状況
 - go-openh264 の対応プロファイル
+- V6〜V8 を kagelife で動かしていない（fps・メモリ・4 ターゲットでの動きのどれも）
+- V6 の Linux arm64 での動き、Linux で要るライブラリとドライバ、go.mod の要求（どれも別の調査の報告で、未確認）
+- V7 の 1080p での速さと音声の対応、V8 の FFmpeg の共有ライブラリを配るときのライセンスの扱い
 - jpg の EXIF の向きの扱い
 - ffmpeg を外部プロセスで使う場合の、配布物のライセンス上の扱い（リンクしないので影響は小さい見込みだが、確かめていない）
 
@@ -334,7 +367,7 @@ flowchart LR
 3. 論点 3: 素材の指定方法（3A・3B・3C）、相対パスの基準、予約名のシェーダが読める素材の範囲
 4. 「ベクトルの一部として使う」は (i) SVG の形か、(ii) ベクトル場か、両方か
 5. SVG の手段（S1〜S4）と、oksvg を直接依存に足すか
-6. 動画は V1（ffmpeg）か V2（MPEG-1 へ事前変換）か V3（連番画像）か、それ以外か
+6. 動画は V1（ffmpeg の外部プロセス）・V2（MPEG-1 へ事前変換）・V6（hwmediacodec、ハードウェア復号）・V7（govid、純 Go のソフトウェア復号）・V8（go-avebi、FFmpeg の共有ライブラリ）のどれか（V3〜V5 も残す）
 7. wav の用途（W1 鳴らす・W2 解析の入力・W3 見た目の素材）
 8. GIF・動画の時間を実時間にするか拍に合わせるか
 9. 段階の順序。依頼者の優先順位（画像・GIF・SVG・動画・wav・フォントのどれを先に使いたいか）を聞く
@@ -355,3 +388,9 @@ flowchart LR
 - https://github.com/srwiley/oksvg
 - https://pkg.go.dev/github.com/Eyevinn/hi264
 - https://pkg.go.dev/github.com/y9o/go-openh264
+- https://github.com/shibukawa/hwmediacodec
+- https://github.com/liqMix/govid
+- https://github.com/bstkhq/go-avebi
+- https://github.com/hajimehoshi/ebiten/issues/905
+- https://github.com/hajimehoshi/ebiten/issues/110
+- https://github.com/hajimehoshi/ebiten/issues/3065
